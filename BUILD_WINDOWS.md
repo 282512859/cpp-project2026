@@ -93,3 +93,29 @@ quit
 - `Git was not found`：安装 Git for Windows，重新打开命令行。
 - vcpkg 下载失败：检查网络，或手动设置 `VCPKG_ROOT` 指向已有 vcpkg。
 - 客户端无法连接：确认服务端窗口仍在运行、IP/端口正确，并检查 Windows 防火墙。
+
+## 可选：使用 Qt 构建（用于 GUI 开发）
+
+如果要在本仓库基础上开发 Qt GUI，新增了 CMake 选项 `BUILD_QT_CLIENT`（默认 OFF），它会编译 cloud_client_qt 静态库（包含 QtClient 封装，依赖 Qt6::Core）。
+
+准备工作：
+- 安装 Qt 6（推荐用 Qt Online Installer），选择与 Visual Studio 2022 对应的 MSVC 构建（例如 MSVC 2019/2022 x64，确保与本机编译器兼容）。
+- 确保 CMake 能找到 Qt（通常安装后 CMake 能自动发现；如不能，设置环境变量 `Qt6_DIR` 或 `CMAKE_PREFIX_PATH` 指向 Qt 安装的 cmake 目录，或使用 vcpkg 的 Qt 包）。
+
+使用预设（推荐）:
+
+```powershell
+cmake --preset windows-debug-qt
+cmake --build --preset windows-debug-qt
+```
+
+或手工：
+
+```powershell
+cmake -S . -B out/build/windows-debug-qt -DBUILD_QT_CLIENT=ON -DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake
+cmake --build out/build/windows-debug-qt --config Debug
+```
+
+说明：
+- `BUILD_QT_CLIENT` 只构建封装库 cloud_client_qt（Core 模块）。若需要完整 GUI，还需创建或添加一个 Qt 可执行目标并链接 cloud_client_qt，同时在 CMake 中 find_package(Qt6 COMPONENTS Widgets REQUIRED) 等。
+- 使用 Qt 构建会增加依赖和构建时间；默认构建不启用以保持轻量。

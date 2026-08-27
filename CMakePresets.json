@@ -24,14 +24,36 @@
       "inherits": "windows-debug",
       "displayName": "Visual Studio 2022 x64 Release",
       "binaryDir": "${sourceDir}/out/build/windows-release"
+    },
+    {
+      "name": "windows-debug-qt",
+      "inherits": "windows-debug",
+      "displayName": "Visual Studio 2022 x64 Debug (Qt)",
+      "binaryDir": "${sourceDir}/out/build/windows-debug-qt",
+      "cacheVariables": {
+        "BUILD_QT_CLIENT": "ON"
+      }
+    },
+    {
+      "name": "windows-release-qt",
+      "inherits": "windows-release",
+      "displayName": "Visual Studio 2022 x64 Release (Qt)",
+      "binaryDir": "${sourceDir}/out/build/windows-release-qt",
+      "cacheVariables": {
+        "BUILD_QT_CLIENT": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug" },
-    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" }
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" },
+    { "name": "windows-debug-qt", "configurePreset": "windows-debug-qt", "configuration": "Debug" },
+    { "name": "windows-release-qt", "configurePreset": "windows-release-qt", "configuration": "Release" }
   ],
   "testPresets": [
     { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug", "output": { "outputOnFailure": true } },
-    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } }
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } },
+    { "name": "windows-debug-qt", "configurePreset": "windows-debug-qt", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "windows-release-qt", "configurePreset": "windows-release-qt", "configuration": "Release", "output": { "outputOnFailure": true } }
   ]
 }
