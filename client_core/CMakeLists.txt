@@ -1,0 +1,3 @@
+add_library(cloud_client_core STATIC src/ClientCore.cpp)
+target_include_directories(cloud_client_core PUBLIC include)
+target_link_libraries(cloud_client_core PUBLIC cloud_common)

@@ -1,0 +1,5 @@
+{
+  "name": "lan-cloud-drive",
+  "version-string": "0.1.0",
+  "dependencies": ["sqlite3"]
+}

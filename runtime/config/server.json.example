@@ -1,0 +1,7 @@
+{
+  "listenAddress": "0.0.0.0",
+  "port": 9000,
+  "databasePath": "runtime/cloud.db",
+  "storageRoot": "runtime/storage",
+  "chunkSize": 262144
+}

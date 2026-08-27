@@ -1,0 +1,9 @@
+/out/
+/build/
+/dist/
+/tools/vcpkg/
+/runtime/cloud.db*
+/runtime/storage/blobs/
+/runtime/storage/temp/
+*.download
+*.part

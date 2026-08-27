@@ -1,0 +1,32 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "windows-debug",
+      "displayName": "Visual Studio 2022 x64 Debug",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/out/build/windows-debug",
+      "architecture": "x64",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>",
+        "LANCLOUD_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "windows-release",
+      "inherits": "windows-debug",
+      "displayName": "Visual Studio 2022 x64 Release",
+      "binaryDir": "${sourceDir}/out/build/windows-release"
+    }
+  ],
+  "buildPresets": [
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug" },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release" }
+  ],
+  "testPresets": [
+    { "name": "windows-debug", "configurePreset": "windows-debug", "configuration": "Debug", "output": { "outputOnFailure": true } },
+    { "name": "windows-release", "configurePreset": "windows-release", "configuration": "Release", "output": { "outputOnFailure": true } }
+  ]
+}
