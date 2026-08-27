@@ -1,4 +1,5 @@
 @echo off
+REM 负责人：成员4：客户端界面
 cd /d "%~dp0"
 if not exist runtime\storage mkdir runtime\storage
 echo Starting LanCloudDrive server on TCP port 9000...

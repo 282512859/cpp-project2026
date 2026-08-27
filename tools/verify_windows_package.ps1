@@ -1,3 +1,4 @@
+<# 负责人：成员1：服务端架构/组长 #>
 param(
     [Parameter(Mandatory = $true)]
     [string]$PackageRoot

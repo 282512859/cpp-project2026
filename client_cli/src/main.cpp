@@ -1,3 +1,4 @@
+// 负责人：成员4：客户端界面
 #include "cloud/client/ClientCore.h"
 #include "cloud/common/ProtocolConstants.h"
 

@@ -1,4 +1,5 @@
 @echo off
+REM 负责人：成员1：服务端架构/组长
 setlocal EnableExtensions
 
 if defined VCPKG_ROOT if exist "%VCPKG_ROOT%\vcpkg.exe" goto :ready

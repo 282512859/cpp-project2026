@@ -1,3 +1,4 @@
+// 负责人：成员1：服务端架构/组长
 #include "cloud/common/Sha256.h"
 
 #include <algorithm>

@@ -1,3 +1,4 @@
+# 负责人：成员1：服务端架构/组长
 add_library(cloud_common STATIC
     src/ExecutablePath.cpp
     src/JsonLite.cpp
