@@ -29,6 +29,7 @@ add_subdirectory(common)
 add_subdirectory(server)
 add_subdirectory(client_core)
 add_subdirectory(client_cli)
+add_subdirectory(client_qt)
 
 if(LANCLOUD_BUILD_TESTS)
     enable_testing()
