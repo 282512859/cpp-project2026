@@ -13,8 +13,8 @@ public:
     void setEntries(const QVariantList &entries);
 
 signals:
-    void enterDirectory(qint64 parentId);
-    void downloadNode(qint64 nodeId);
+    void enterDirectory(qint64 parentId, const QString &name);
+    void downloadNode(qint64 nodeId, const QString &name, bool directory);
     void renameNode(qint64 nodeId);
     void deleteNode(qint64 nodeId);
     void refreshRequested();
@@ -27,5 +27,3 @@ private:
     QTreeView *view_;
     QStandardItemModel *model_;
 };
-
-Q_DECLARE_METATYPE(QVariantList)

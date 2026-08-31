@@ -41,7 +41,10 @@ public slots:
     void doRename(qint64 nodeId, const QString &name);
     void doDelete(qint64 nodeId);
     void doUpload(const QString &localPath, qint64 parentId, const QString &remoteName);
+    void doUploadDirectory(const QString &localPath, qint64 parentId);
     void doDownload(qint64 nodeId, const QString &localPath);
+    void doDownloadDirectory(qint64 nodeId, const QString &remoteName,
+                             const QString &localParentPath);
 
 signals:
     void error(const QString &code, const QString &message);
@@ -75,11 +78,20 @@ public:
     Q_INVOKABLE void renameNode(qint64 nodeId, const QString &name);
     Q_INVOKABLE void deleteNode(qint64 nodeId);
     Q_INVOKABLE void upload(const QString &localPath, qint64 parentId, const QString &remoteName = QString());
+    Q_INVOKABLE void uploadDirectory(const QString &localPath, qint64 parentId);
     Q_INVOKABLE void download(qint64 nodeId, const QString &localPath);
+    Q_INVOKABLE void downloadDirectory(qint64 nodeId, const QString &remoteName,
+                                       const QString &localParentPath);
 
 signals: // public signals for UI
     void errorOccurred(const QString &code, const QString &message);
+    void registerFinished();
+    void loginFinished();
+    void logoutFinished();
     void listReady(const QVariantList &entries);
+    void mkdirFinished(qint64 nodeId);
+    void renameFinished();
+    void deleteFinished();
     void uploadProgress(qint64 done, qint64 total);
     void uploadFinished(qint64 nodeId);
     void downloadProgress(qint64 done, qint64 total);
@@ -99,7 +111,10 @@ signals:
     void invokeRename(qint64 nodeId, const QString &name);
     void invokeDelete(qint64 nodeId);
     void invokeUpload(const QString &localPath, qint64 parentId, const QString &remoteName);
+    void invokeUploadDirectory(const QString &localPath, qint64 parentId);
     void invokeDownload(qint64 nodeId, const QString &localPath);
+    void invokeDownloadDirectory(qint64 nodeId, const QString &remoteName,
+                                 const QString &localParentPath);
 };
 
 } // namespace cloud::client

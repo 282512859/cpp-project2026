@@ -64,11 +64,16 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
         client_->upload(path, currentParent_, QString());
     });
 
-    connect(browser_, &FileBrowser::enterDirectory, this, [&](qint64 id){ currentParent_ = id; client_->list(currentParent_); });
-    connect(browser_, &FileBrowser::downloadNode, this, [&](qint64 id){
-        QString save = QFileDialog::getSaveFileName(this, "Save file as");
-        if(save.isEmpty()) return;
-        client_->download(id, save);
+    connect(browser_, &FileBrowser::enterDirectory, this, [&](qint64 id, const QString &){ currentParent_ = id; client_->list(currentParent_); });
+    connect(browser_, &FileBrowser::downloadNode, this,
+            [&](qint64 id, const QString &name, bool directory){
+        if (directory) {
+            const QString parent = QFileDialog::getExistingDirectory(this, "Choose destination folder");
+            if (!parent.isEmpty()) client_->downloadDirectory(id, name, parent);
+            return;
+        }
+        const QString save = QFileDialog::getSaveFileName(this, "Save file as", name);
+        if (!save.isEmpty()) client_->download(id, save);
     });
 
     connect(client_, &QtClient::listReady, this, [&](const QVariantList &entries){ browser_->setEntries(entries); });
