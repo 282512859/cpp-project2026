@@ -1,57 +1,80 @@
 <!-- 负责人：成员4：客户端界面 -->
-# LanCloudDrive 第一版（v0.1）
+# LanCloudDrive
 
-这是《C++ 局域网网盘》三次迭代中的第一版：提供两个独立的 Windows x64 控制台程序 `cloud_server.exe` 和 `cloud_client.exe`，验证 C/S 架构、公共协议、持久化与文件传输主链路。工程面向 Visual Studio 2022，可生成静态链接的免安装运行包。第二版再加入后台任务和更完善的交互，第三版加入文件转换/视频快照等创新功能。
+LanCloudDrive 是一个使用 C++20、Qt 6、TCP 和 SQLite 实现的局域网网盘。项目采用客户端/服务端架构：一台 Windows 电脑运行服务端，同一局域网内的多台电脑可以通过 Qt 图形客户端或命令行客户端注册、登录并管理各自的文件。
 
-## 已实现功能
+当前项目同时保留两种客户端：
 
-- TCP 客户端/服务端，服务端采用“每连接一线程”；
-- 固定 24 字节网络序报文头，可靠处理分包与粘包；
-- 用户注册、登录、注销与随机会话令牌；
-- SQLite 持久化，用户数据互相隔离；
-- 根目录/子目录浏览、新建目录、重命名、递归删除；
-- 文件按 256 KiB 顺序分块上传、下载和进度输出；
-- 上传先写 `.part`，完成后重新计算 SHA-256，再提交文件节点；
-- 按 `SHA-256 + size` 内容去重，相同文件再次上传可秒传；
-- 下载先写 `.download`，大小及 SHA-256 校验成功后才改为目标文件；
-- 中文远端文件名、空文件、错误密码、重名和越权访问的基本处理；
-- 协议编解码、粘包/半包、SHA-256、JSON 的无框架单元测试。
+- `client_qt_example`：主要使用入口，提供独立登录页、文件管理界面和传输进度；
+- `cloud_client`：命令行客户端，适合协议调试、自动化验证和低依赖演示。
 
-## 第一版的边界
+> 安全说明：当前协议没有 TLS，口令通过 TCP 明文传输，数据库中的口令摘要也只适合课程演示。请仅在可信局域网中使用，不要直接暴露到公网，也不要存放真实敏感文件。
 
-本版客户端是命令行程序 `cloud_client`。尚未实现 Qt 图形界面、GUI/网络异步桥接、每任务独立连接、取消与重试、断点续传、心跳超时、配额、PBKDF2、TLS、文档转 Markdown 和视频快照。它们分别属于第二、第三版。
+## 当前功能
 
-本版仍遵守最终工程的核心边界：公共协议只有 `cloud_common` 一份；服务端 socket、业务和 SQLite 分层；客户端通过 `ClientCore` 访问网络，后续 Qt 界面无需接触裸 socket。
+### Qt 图形客户端
 
-> 安全说明：目前口令经 TCP 明文传输，数据库内仅保存随机盐加 SHA-256 的演示级摘要。只可用于可信局域网课程演示，不可直接部署到公网或保存真实敏感文件。
+- 登录页与网盘工作区分离；
+- 注册、登录、注销及切换账号后主动刷新；
+- 浏览根目录和多级子目录；
+- 新建目录、重命名和递归删除；
+- 上传单个文件；
+- 递归上传完整文件夹，包括嵌套目录、空目录和中文路径；
+- 下载单个文件；
+- 右键递归下载完整文件夹并还原目录结构；
+- 上传、下载整体进度条和活动记录；
+- 文件大小、修改时间、目录图标和路径导航；
+- 记住上一次使用的服务端地址和端口；
+- 网络与文件操作放在独立 Qt 工作线程中，避免阻塞界面。
 
-## 一键生成 VS2022 解决方案和免安装包
+### 服务端与公共协议
 
-安装 Visual Studio 2022“使用 C++ 的桌面开发”和 Git for Windows 后，双击源码根目录中的：
+- 服务端监听 `0.0.0.0:9000`，允许同一局域网中的多个客户端连接；
+- 服务端采用“每连接一线程”的处理方式；
+- 固定 24 字节网络序报文头，处理 TCP 分包和粘包；
+- 用户注册、登录、注销和随机会话令牌；
+- SQLite 持久化及用户数据隔离；
+- 文件按 256 KiB 分块上传和下载；
+- 上传先写入 `.part`，完成后重新计算 SHA-256 再提交节点；
+- 按 `SHA-256 + size` 去重，相同内容可以秒传；
+- 下载先写入 `.download`，大小和 SHA-256 校验成功后再生成正式文件；
+- 拒绝路径穿越名称，服务端真实存储路径不直接使用用户文件名。
 
-```text
-build_release.bat
+## 系统结构
+
+```mermaid
+flowchart LR
+    A[Qt 图形客户端] -->|TCP 9000| C[cloud_server]
+    B[命令行客户端] -->|TCP 9000| C
+    C --> D[(SQLite 元数据)]
+    C --> E[SHA-256 内容存储]
 ```
 
-脚本将自动准备 vcpkg/SQLite、生成 VS2022 解决方案、静态编译、执行测试并输出：
+`cloud_common` 是协议、JSON、SHA-256 和 socket 封装的唯一公共实现。Qt 界面通过 `QtClient` 调用 `ClientCore`，不会直接操作裸 socket。
 
-```text
-dist/LanCloudDrive_v0.1_windows_x64_portable.zip
-out/build/windows-release/LanCloudDrive.sln
-```
+## Windows 开发环境
 
-免安装包中的 SQLite 和 MSVC 运行库已经静态链接，验证电脑不需要安装 Visual Studio 或 SQLite DLL。完整说明见 [BUILD_WINDOWS.md](BUILD_WINDOWS.md)。
+需要安装：
 
-## 手动 Windows 构建环境
-
-需要：
-
-1. Visual Studio 2022，安装“使用 C++ 的桌面开发”；
+1. Visual Studio 2022，并勾选“使用 C++ 的桌面开发”；
 2. CMake 3.24 或更高版本；
-3. Git；
-4. vcpkg；SQLite3 由 `vcpkg.json` 自动安装并静态链接。
+3. Git for Windows；
+4. vcpkg；
+5. Qt 6 的 MSVC 2022 64 位组件，例如 `msvc2022_64`；
+6. VS Code（可选，适合日常开发）。
 
-首次安装 vcpkg：
+Qt 客户端使用 CMake，不要求单独调用 `qmake`。
+
+### VS Code 推荐扩展
+
+- C/C++；
+- CMake Tools；
+- GitHub Copilot（可选）；
+- GitHub Pull Requests（可选，用于查看 Issue、提交和审查 PR）。
+
+## 准备 vcpkg 和 Qt
+
+首次准备 vcpkg：
 
 ```powershell
 git clone https://github.com/microsoft/vcpkg C:\dev\vcpkg
@@ -59,116 +82,259 @@ C:\dev\vcpkg\bootstrap-vcpkg.bat
 $env:VCPKG_ROOT = "C:\dev\vcpkg"
 ```
 
-在本项目根目录构建：
+设置 Qt 根目录。请把示例路径改成自己的实际安装位置：
 
 ```powershell
-cmake --preset windows-debug
-cmake --build --preset windows-debug
-ctest --preset windows-debug
+$env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
+$env:Qt6_DIR = "$env:QT_ROOT\lib\cmake\Qt6"
 ```
 
-`vcpkg.json` 会声明 SQLite3 依赖，预设固定使用 `x64-windows-static` 和 MSVC `/MT`。若团队不用清单模式，也可先执行：
+如果希望以后打开终端时仍然可用，可以把 `VCPKG_ROOT` 和 `Qt6_DIR` 设置为用户环境变量。
+
+## 构建 Qt 图形客户端
+
+在仓库根目录运行：
 
 ```powershell
-C:\dev\vcpkg\vcpkg.exe install sqlite3:x64-windows-static
+cmake --preset windows-debug-qt -DCMAKE_PREFIX_PATH="$env:QT_ROOT"
+cmake --build --preset windows-debug-qt
 ```
 
-生成文件默认位于：
+Debug 版本的主要程序通常位于：
 
 ```text
-out/build/windows-debug/Debug/cloud_server.exe
-out/build/windows-debug/Debug/cloud_client.exe
+out/build/windows-debug-qt/server/Debug/cloud_server.exe
+out/build/windows-debug-qt/client_cli/Debug/cloud_client.exe
+out/build/windows-debug-qt/client_qt/Debug/client_qt_example.exe
 ```
 
-Release 构建使用：
+Release 构建：
 
 ```powershell
-cmake --preset windows-release
-cmake --build --preset windows-release
+cmake --preset windows-release-qt -DCMAKE_PREFIX_PATH="$env:QT_ROOT"
+cmake --build --preset windows-release-qt
 ```
 
-## 启动与演示
-
-免安装包本机验证时，先双击 `run_server.bat`，再双击 `run_client_local.bat`。
-
-也可以手动启动。在电脑 A 开放 Windows 防火墙 TCP 9000 端口后运行服务端：
-
-```powershell
-.\out\build\windows-debug\Debug\cloud_server.exe 9000 .\runtime
-```
-
-在电脑 A 本机或同一局域网电脑 B 启动客户端；将 `192.168.1.10` 换成服务端局域网 IPv4 地址，也可以使用免安装包中的 `run_client_lan.bat`：
-
-```powershell
-.\out\build\windows-debug\Debug\cloud_client.exe 192.168.1.10 9000
-```
-
-推荐演示命令：
+对应 Qt 客户端通常位于：
 
 ```text
-register alice password123
-login alice password123
-mkdir 0 "课程资料"
-put "C:\Users\Alice\Desktop\报告.pdf" 1 "报告.pdf"
-ls 1
-get 2 "C:\Users\Alice\Desktop\下载的报告.pdf"
-rename 2 "最终报告.pdf"
-rm 2
-logout
-quit
+out/build/windows-release-qt/client_qt/Release/client_qt_example.exe
 ```
 
-根目录 ID 固定使用 `0`。`mkdir`、`put` 返回的新节点 ID 会因数据库内容而变化，请使用程序实际输出的 ID。
+如果 `cmake` 没有加入 `PATH`，可以在 VS Code 的 CMake Tools 中选择 Visual Studio 2022 Kit，或者使用 CMake 安装目录中的完整可执行路径。
 
-含空格的名称或路径必须放在双引号中。口令不要包含空格；第一版 CLI 不支持带空格口令。
+## 在 VS Code 中构建
 
-## 命令表
+1. 使用 VS Code 打开仓库根目录；
+2. 在状态栏或命令面板中执行 `CMake: Select Configure Preset`；
+3. 选择 `windows-debug-qt`；
+4. 确认当前 Kit 为 Visual Studio 2022 x64；
+5. 执行 `CMake: Configure`；
+6. 将构建目标切换为 `client_qt_example`；
+7. 执行 `CMake: Build`。
+
+如果配置阶段提示找不到 Qt 6，请确认 `Qt6_DIR` 或 `CMAKE_PREFIX_PATH` 指向 `msvc2022_64`，而不是 MinGW 版本。
+
+## 启动服务端
+
+在作为服务端的电脑上运行：
+
+```powershell
+.\out\build\windows-debug-qt\server\Debug\cloud_server.exe 9000 .\runtime
+```
+
+参数说明：
+
+```text
+cloud_server.exe [端口] [运行时数据目录]
+```
+
+省略参数时，端口默认为 `9000`，运行时数据目录默认为服务端可执行文件旁边的 `runtime`。
+
+服务端窗口需要持续运行。所有账号、目录元数据和文件实体都保存在运行时数据目录中。
+
+## 同一局域网多客户端
+
+### 1. 查询服务端 IP
+
+在服务端电脑运行：
+
+```powershell
+ipconfig
+```
+
+找到当前无线网卡或以太网网卡的 IPv4 地址，例如 `192.168.1.10`。
+
+### 2. 放行 TCP 9000
+
+可以在 Windows Defender 防火墙中允许 `cloud_server.exe` 通过专用网络。也可以在管理员 PowerShell 中添加仅限本地子网的规则：
+
+```powershell
+New-NetFirewallRule `
+  -DisplayName "LanCloudDrive Server (TCP 9000)" `
+  -Direction Inbound `
+  -Action Allow `
+  -Protocol TCP `
+  -LocalPort 9000 `
+  -RemoteAddress LocalSubnet `
+  -Profile Private,Public
+```
+
+不再使用时可以删除这条规则：
+
+```powershell
+Remove-NetFirewallRule -DisplayName "LanCloudDrive Server (TCP 9000)"
+```
+
+### 3. 启动客户端
+
+服务端电脑本机可以填写：
+
+```text
+127.0.0.1:9000
+```
+
+其他局域网设备应填写服务端的 IPv4 地址：
+
+```text
+192.168.1.10:9000
+```
+
+每台客户端电脑都运行自己的 Qt 客户端。首次使用先创建账号，再使用相同账号登录。不同账号的根目录互相隔离。
+
+如果无法连接，请依次检查：
+
+- 所有设备是否连接到同一路由器或热点；
+- 服务端窗口是否仍在运行；
+- 客户端填写的是否为服务端当前 IPv4 地址；
+- TCP 9000 是否被防火墙拦截；
+- Wi-Fi 是否启用了客户端隔离；
+- 服务端 IP 是否因重新联网而变化。
+
+## Qt 客户端操作
+
+- 双击目录进入；
+- 点击 `Up` 返回上一级；
+- 点击 `New folder` 创建目录；
+- 点击 `Upload file` 上传文件；
+- 点击 `Upload folder` 递归上传整个文件夹；
+- 右键文件或目录可以下载、重命名或删除；
+- 下载目录时选择“保存到哪个父目录”，客户端会在其中创建同名文件夹；
+- 已存在的下载目标不会被覆盖；
+- 上传、下载完成后文件列表会主动刷新。
+
+## 把 Qt 客户端部署到其他电脑
+
+只复制 `client_qt_example.exe` 不够，目标电脑还需要 Qt 运行库。应先构建 Release，再使用 Qt 自带的 `windeployqt` 收集依赖：
+
+```powershell
+$source = ".\out\build\windows-release-qt\client_qt\Release\client_qt_example.exe"
+$target = ".\dist\LanCloudDrive-client-win64"
+
+New-Item -ItemType Directory -Force $target
+Copy-Item $source "$target\LanCloudDrive.exe"
+& "$env:QT_ROOT\bin\windeployqt.exe" `
+  --release `
+  --compiler-runtime `
+  --dir $target `
+  "$target\LanCloudDrive.exe"
+```
+
+将整个 `dist/LanCloudDrive-client-win64` 文件夹复制到其他 Windows x64 电脑，运行其中的 `LanCloudDrive.exe`，然后填写服务端局域网 IP。
+
+## 命令行客户端
+
+不需要 Qt GUI 时，可以使用原有命令行客户端：
+
+```powershell
+.\out\build\windows-debug\server\Debug\cloud_server.exe 9000 .\runtime
+.\out\build\windows-debug\client_cli\Debug\cloud_client.exe 127.0.0.1 9000
+```
+
+常用命令：
 
 | 命令 | 含义 |
 |---|---|
-| `register <用户名> <口令>` | 注册；用户名 3～32 字节，口令 8～128 字节 |
+| `register <用户名> <口令>` | 注册账号 |
 | `login <用户名> <口令>` | 登录并保存本次进程内令牌 |
-| `ls [父目录ID]` | 列目录；不传参数时列根目录 |
+| `ls [父目录ID]` | 列出目录，不传参数时列根目录 |
 | `mkdir <父目录ID> "名称"` | 新建目录 |
 | `rename <节点ID> "新名称"` | 重命名文件或目录 |
 | `rm <节点ID>` | 删除文件或递归删除目录 |
-| `put "本地路径" <父目录ID> ["远端名称"]` | 上传文件 |
-| `get <节点ID> "本地路径"` | 下载文件；拒绝覆盖已有目标 |
+| `put "本地路径" <父目录ID> ["远端名称"]` | 上传单个文件 |
+| `get <节点ID> "本地路径"` | 下载单个文件 |
 | `logout` | 注销当前令牌 |
 | `help` / `quit` | 显示帮助 / 退出 |
+
+根目录 ID 固定为 `0`。含空格的名称或路径需要放在双引号中。
+
+## CLI 一键构建与免安装包
+
+原有脚本仍用于构建和验证服务端及命令行客户端：
+
+```text
+build_release.bat
+```
+
+成功后生成：
+
+```text
+dist/LanCloudDrive_v0.1_windows_x64_portable.zip
+out/build/windows-release/LanCloudDrive.sln
+```
+
+该脚本生成的现有免安装包只包含 `cloud_server.exe` 和命令行客户端。Qt 图形客户端需要按照上一节单独使用 `windeployqt` 部署。
+
+完整的 Windows 构建说明见 [BUILD_WINDOWS.md](BUILD_WINDOWS.md)。
 
 ## 运行时数据
 
 ```text
 runtime/
-├─ cloud.db                 # SQLite 元数据
+├─ cloud.db
 └─ storage/
-   ├─ blobs/ab/cd/<sha256>  # 内容寻址文件实体
-   └─ temp/<transfer>.part  # 未完成上传
+   ├─ blobs/ab/cd/<sha256>
+   └─ temp/<transfer>.part
 ```
 
-用户提供的文件名不会参与服务端真实文件路径拼接，因此 `../` 等路径穿越名称会被拒绝。运行时数据库、blob 和临时文件已加入 `.gitignore`，不得提交到仓库。
+- `cloud.db` 保存账号、目录节点、文件节点和内容索引；
+- `storage/blobs` 保存按 SHA-256 寻址的文件实体；
+- `storage/temp` 保存未完成上传；
+- 运行时数据库、blob、`.part` 和 `.download` 文件均不应提交到 Git。
+
+备份服务端时，应同时备份完整的 `runtime` 目录。不要只复制数据库或只复制 `storage`。
+
+## 当前限制
+
+- 没有 TLS，不适合公网部署；
+- 没有断点续传、传输取消和自动重试；
+- 单个 Qt 客户端内的网络任务按工作线程顺序执行；
+- 文件夹传输复用现有的建目录、列目录和单文件传输协议；
+- 文件夹传输中途失败时，已经成功创建或传输的部分不会自动回滚；
+- 下载目录要求目标父目录下不存在同名文件夹；
+- 当前 GUI 便携包尚未合并进 `build_release.bat`；
+- 桌宠等装饰功能尚未实现。
 
 ## 工程结构
 
 ```text
 LanCloudDrive/
-├─ common/       cloud_common：协议、JSON、SHA-256、TCP 封装
-├─ server/       cloud_server：会话、SQLite、目录与传输业务
-├─ client_core/  cloud_client_core：同步客户端 API 与传输校验
-├─ client_cli/   cloud_client：第一版命令行界面
-├─ tests/        无第三方测试框架的公共层测试
-├─ docs/         协议、数据库和迭代说明
-└─ runtime/      本地运行数据（首次运行自动创建）
+├─ common/       公共协议、JSON、SHA-256、TCP 和可执行路径工具
+├─ server/       服务端、会话、SQLite、目录和文件传输
+├─ client_core/  同步客户端 API 与 Qt 工作线程适配层
+├─ client_cli/   命令行客户端
+├─ client_qt/    Qt 6 Widgets 图形客户端
+├─ tests/        公共层测试
+├─ docs/         协议、数据库、迭代和团队维护说明
+├─ packaging/    服务端与 CLI 启动脚本
+├─ tools/        vcpkg、打包和冒烟验证脚本
+└─ runtime/      本地运行数据
 ```
 
-## 第一版现场验收建议
+更多设计资料：
 
-1. 两个客户端分别注册用户，证明根目录互相不可见；
-2. 上传带中文名的文件并显示进度；
-3. 下载到新路径，使用 `certutil -hashfile 文件 SHA256` 对比哈希；
-4. 使用不同远端名称再次上传同一内容，观察立即完成，并确认 blobs 中仍只有一份实体；
-5. 重启服务端后再次登录，确认目录和文件仍存在；
-6. 演示错误密码、同目录重名、越权节点 ID 和下载目标已存在时的错误。
-
-详细协议见 [docs/protocol.md](docs/protocol.md)，数据库见 [docs/database.md](docs/database.md)，后续计划见 [docs/iterations.md](docs/iterations.md)，四人维护边界见 [docs/team-ownership.md](docs/team-ownership.md)。
+- [协议说明](docs/protocol.md)
+- [数据库说明](docs/database.md)
+- [迭代计划](docs/iterations.md)
+- [团队维护边界](docs/team-ownership.md)
+- [Windows 构建说明](BUILD_WINDOWS.md)
