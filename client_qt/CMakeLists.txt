@@ -9,6 +9,8 @@ find_package(Qt6 COMPONENTS Core Widgets REQUIRED)
 add_executable(client_qt_example
   src/main.cpp
   src/FileBrowser.cpp
+  src/MainWindow.cpp
+  src/TransferManager.cpp
 )
 
 target_include_directories(client_qt_example PRIVATE ${CMAKE_SOURCE_DIR}/client_core/include ${CMAKE_SOURCE_DIR}/client_qt/include)
