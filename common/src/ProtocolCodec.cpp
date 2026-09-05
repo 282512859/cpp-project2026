@@ -8,6 +8,8 @@
 namespace cloud::common {
 namespace {
 
+// put/get 系列函数手工按“大端序（网络字节序）”读写整数。
+// 例如 0x1234 会依次写成 0x12、0x34，与本机 CPU 使用何种端序无关。
 void put16(std::uint8_t* out, std::uint16_t value) {
     out[0] = static_cast<std::uint8_t>(value >> 8U);
     out[1] = static_cast<std::uint8_t>(value);
@@ -36,6 +38,7 @@ std::uint64_t get64(const std::uint8_t* in) {
 
 std::array<std::uint8_t, 24> encodeHeader(const PacketHeader& h) {
     std::array<std::uint8_t, 24> bytes{};
+    // 每个字段的偏移必须与 docs/protocol.md 中的线协议一致。
     put32(bytes.data(), h.magic);
     put16(bytes.data() + 4, h.version);
     put16(bytes.data() + 6, static_cast<std::uint16_t>(h.type));
@@ -47,6 +50,7 @@ std::array<std::uint8_t, 24> encodeHeader(const PacketHeader& h) {
 
 bool decodeHeader(const std::array<std::uint8_t, 24>& bytes,
                   PacketHeader& h, std::string& error) {
+    // 先完整解码，再逐项验证。验证在分配正文内存前完成，可降低攻击面。
     h.magic = get32(bytes.data());
     h.version = get16(bytes.data() + 4);
     h.type = static_cast<MessageType>(get16(bytes.data() + 6));
@@ -62,6 +66,7 @@ bool decodeHeader(const std::array<std::uint8_t, 24>& bytes,
 
 std::vector<std::uint8_t> encodePacket(const Packet& packet) {
     PacketHeader h = packet.header;
+    // 以实际 body 大小为准，避免调用方留下过期或错误的 bodyLength。
     h.bodyLength = static_cast<std::uint32_t>(packet.body.size());
     const auto header = encodeHeader(h);
     std::vector<std::uint8_t> bytes;
@@ -72,20 +77,24 @@ std::vector<std::uint8_t> encodePacket(const Packet& packet) {
 }
 
 void PacketStreamDecoder::append(const std::uint8_t* data, std::size_t size) {
+    // 新收到的字节接在旧的半包之后。
     buffer_.insert(buffer_.end(), data, data + size);
 }
 
 bool PacketStreamDecoder::tryPop(Packet& packet, std::string& error) {
+    // 连头都没收齐时，还不知道正文应有多长。
     if (buffer_.size() < kPacketHeaderSize) return false;
     std::array<std::uint8_t, 24> raw{};
     std::copy_n(buffer_.begin(), raw.size(), raw.begin());
     PacketHeader h;
     if (!decodeHeader(raw, h, error)) throw std::runtime_error(error);
     const auto total = kPacketHeaderSize + static_cast<std::size_t>(h.bodyLength);
+    // 头已完整但正文仍是半包：保留缓冲区，等待下一次 append。
     if (buffer_.size() < total) return false;
     packet.header = h;
     packet.body.assign(buffer_.begin() + static_cast<std::ptrdiff_t>(kPacketHeaderSize),
                        buffer_.begin() + static_cast<std::ptrdiff_t>(total));
+    // 只消费第一个完整包；后面即使还有粘在一起的包，也留给下一次 tryPop。
     buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(total));
     return true;
 }
