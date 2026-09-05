@@ -10,6 +10,30 @@ LanCloudDrive 是一个使用 C++20、Qt 6、TCP 和 SQLite 实现的局域网�
 
 > 安全说明：当前协议没有 TLS，口令通过 TCP 明文传输，数据库中的口令摘要也只适合课程演示。请仅在可信局域网中使用，不要直接暴露到公网，也不要存放真实敏感文件。
 
+## 快速启动（Qt 图形客户端）
+
+已安装 Visual Studio 2022、CMake、vcpkg 和 Qt 6 MSVC x64 后，在仓库根目录执行：
+
+```powershell
+$env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"   # 改为自己的 Qt 安装目录
+cmake --preset windows-debug-qt -DCMAKE_PREFIX_PATH="$env:QT_ROOT"
+cmake --build --preset windows-debug-qt
+```
+
+在第一个终端启动服务端：
+
+```powershell
+.\out\build\windows-debug-qt\server\Debug\cloud_server.exe 9000 .\runtime
+```
+
+在第二个终端启动 Qt 客户端：
+
+```powershell
+.\out\build\windows-debug-qt\client_qt\Debug\client_qt_example.exe
+```
+
+本机连接填写 `127.0.0.1:9000`；其他同一局域网设备填写服务端电脑的 IPv4 地址和端口 `9000`。首次使用先在登录页选择 `Create account` 注册，再选择 `Sign in` 登录。
+
 ## 当前功能
 
 ### Qt 图形客户端
@@ -26,6 +50,16 @@ LanCloudDrive 是一个使用 C++20、Qt 6、TCP 和 SQLite 实现的局域网�
 - 文件大小、修改时间、目录图标和路径导航；
 - 记住上一次使用的服务端地址和端口；
 - 网络与文件操作放在独立 Qt 工作线程中，避免阻塞界面。
+- 右键单个文件生成 8 位提取码，并在另一台客户端领取文件。
+
+## 用提取码传递文件
+
+1. 发送者登录后，右键一个文件并选择 `Create extraction code`；
+2. 将弹出的 8 位提取码发送给接收者；
+3. 接收者登录自己的账号，在工具栏点击 `Extract code` 并输入该码；
+4. 文件会出现在接收者的 `My files` 根目录，双方均可各自下载。
+
+提取码有效期为 24 小时，仅可由非发送者账号领取一次。领取复用服务器中的同一份 SHA-256 内容实体，不会额外复制文件；发送者原文件仍保留。当前版本仅支持单文件提取码，文件夹可先下载后再上传。
 
 ### 服务端与公共协议
 
@@ -201,6 +235,8 @@ Remove-NetFirewallRule -DisplayName "LanCloudDrive Server (TCP 9000)"
 ```
 
 每台客户端电脑都运行自己的 Qt 客户端。首次使用先创建账号，再使用相同账号登录。不同账号的根目录互相隔离。
+
+客户端不需要复制 `runtime`、数据库或 `storage` 文件夹；这些仅保留在服务端电脑。多台客户端可以同时连接同一个 `IP:9000`，每个账号都有独立根目录，并可通过提取码把单个文件交给其他账号。
 
 如果无法连接，请依次检查：
 

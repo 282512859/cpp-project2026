@@ -17,6 +17,7 @@ signals:
     void downloadNode(qint64 nodeId, const QString &name, bool directory);
     void renameNode(qint64 nodeId);
     void deleteNode(qint64 nodeId);
+    void createShareCode(qint64 nodeId);
     void refreshRequested();
 
 private slots:

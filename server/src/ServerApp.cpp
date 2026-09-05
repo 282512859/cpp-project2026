@@ -137,6 +137,18 @@ Packet ServerApp::handle(const Packet& request) {
             const auto user=requireUser(body); repository_.deleteNode(user,json::requireInt(body,"nodeId"));
             return makeJsonPacket(MessageType::DeleteResp,request.header.requestId,"{}",FlagResponse);
         }
+        case MessageType::ShareCreateReq: {
+            const auto user=requireUser(body);
+            const auto code=repository_.createShareCode(user,json::requireInt(body,"nodeId"));
+            return makeJsonPacket(MessageType::ShareCreateResp,request.header.requestId,
+                json::object({{"code",json::quote(code)}}),FlagResponse);
+        }
+        case MessageType::ShareClaimReq: {
+            const auto user=requireUser(body);
+            const auto nodeId=repository_.claimShareCode(user,json::requireString(body,"code"));
+            return makeJsonPacket(MessageType::ShareClaimResp,request.header.requestId,
+                json::object({{"nodeId",std::to_string(nodeId)}}),FlagResponse);
+        }
         case MessageType::UploadInitReq: {
             const auto user=requireUser(body);
             const auto result=repository_.beginUpload(user,json::requireInt(body,"parentId"),json::requireString(body,"name"),json::requireInt(body,"size"),json::requireString(body,"sha256"));

@@ -168,6 +168,8 @@ public:
      * 是否递归删除、能否删除非空目录等策略由服务端实现决定。
      */
     void deleteNode(std::int64_t nodeId);
+    std::string createShareCode(std::int64_t nodeId);
+    std::int64_t claimShareCode(const std::string& code);
 
     /**
      * @brief 把一个本地普通文件分块上传到远程目录。

@@ -147,6 +147,29 @@ void ClientWorker::doUpload(const QString &localPath, qint64 parentId, const QSt
     }
 }
 
+void ClientWorker::doCreateShareCode(qint64 nodeId) {
+    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    try {
+        emit shareCodeCreated(QString::fromStdString(core_->createShareCode(nodeId)));
+    } catch (const ClientError &e) {
+        emit error(QString::fromStdString(e.code()), QString::fromLocal8Bit(e.what()));
+    } catch (const std::exception &e) {
+        emit error("EXCEPTION", QString::fromLocal8Bit(e.what()));
+    }
+}
+
+void ClientWorker::doClaimShareCode(const QString &code) {
+    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    try {
+        emit shareCodeClaimed(static_cast<qint64>(core_->claimShareCode(
+            code.trimmed().toLower().toStdString())));
+    } catch (const ClientError &e) {
+        emit error(QString::fromStdString(e.code()), QString::fromLocal8Bit(e.what()));
+    } catch (const std::exception &e) {
+        emit error("EXCEPTION", QString::fromLocal8Bit(e.what()));
+    }
+}
+
 void ClientWorker::doUploadDirectory(const QString &localPath, qint64 parentId) {
     if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
     try {
@@ -285,6 +308,8 @@ QtClient::QtClient(const QString &host, quint16 port, QObject *parent)
     connect(this, &QtClient::invokeMkdir, worker_, &ClientWorker::doMkdir, Qt::QueuedConnection);
     connect(this, &QtClient::invokeRename, worker_, &ClientWorker::doRename, Qt::QueuedConnection);
     connect(this, &QtClient::invokeDelete, worker_, &ClientWorker::doDelete, Qt::QueuedConnection);
+    connect(this, &QtClient::invokeCreateShareCode, worker_, &ClientWorker::doCreateShareCode, Qt::QueuedConnection);
+    connect(this, &QtClient::invokeClaimShareCode, worker_, &ClientWorker::doClaimShareCode, Qt::QueuedConnection);
     connect(this, &QtClient::invokeUpload, worker_, &ClientWorker::doUpload, Qt::QueuedConnection);
     connect(this, &QtClient::invokeUploadDirectory, worker_, &ClientWorker::doUploadDirectory,
             Qt::QueuedConnection);
@@ -301,6 +326,8 @@ QtClient::QtClient(const QString &host, quint16 port, QObject *parent)
     connect(worker_, &ClientWorker::mkdirFinished, this, &QtClient::mkdirFinished, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::renameFinished, this, &QtClient::renameFinished, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::deleteFinished, this, &QtClient::deleteFinished, Qt::QueuedConnection);
+    connect(worker_, &ClientWorker::shareCodeCreated, this, &QtClient::shareCodeCreated, Qt::QueuedConnection);
+    connect(worker_, &ClientWorker::shareCodeClaimed, this, &QtClient::shareCodeClaimed, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::uploadProgress, this, &QtClient::uploadProgress, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::uploadFinished, this, &QtClient::uploadFinished, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::downloadProgress, this, &QtClient::downloadProgress, Qt::QueuedConnection);
@@ -342,6 +369,14 @@ void QtClient::renameNode(qint64 nodeId, const QString &name) {
 
 void QtClient::deleteNode(qint64 nodeId) {
     emit invokeDelete(nodeId);
+}
+
+void QtClient::createShareCode(qint64 nodeId) {
+    emit invokeCreateShareCode(nodeId);
+}
+
+void QtClient::claimShareCode(const QString &code) {
+    emit invokeClaimShareCode(code);
 }
 
 void QtClient::upload(const QString &localPath, qint64 parentId, const QString &remoteName) {

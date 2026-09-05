@@ -263,6 +263,7 @@ int main(int argc, char **argv) {
     auto *newFolderAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DirIcon), "New folder");
     auto *uploadFileAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_FileIcon), "Upload file");
     auto *uploadFolderAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DirOpenIcon), "Upload folder");
+    auto *claimCodeAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DialogOpenButton), "Extract code");
     fileHeading->addWidget(toolbar);
     auto *browser = new FileBrowser();
     fileLayout->addLayout(fileHeading);
@@ -369,6 +370,24 @@ int main(int argc, char **argv) {
             log->append("Item deleted");
             doList(currentParent);
         });
+        QObject::connect(boundClient, &QtClient::shareCodeCreated, [&](const QString &code) {
+            const auto displayCode = code.toUpper();
+            log->append(QStringLiteral("Extraction code created: %1").arg(displayCode));
+            QMessageBox::information(&window, "Extraction code",
+                                     QStringLiteral("Send this code to the recipient:\n\n%1\n\n"
+                                                    "It is valid for 24 hours and can be claimed once.")
+                                         .arg(displayCode));
+        });
+        QObject::connect(boundClient, &QtClient::shareCodeClaimed, [&](qint64 nodeId) {
+            currentParent = 0;
+            parentStack.clear();
+            pathNames.clear();
+            updateLocation();
+            log->append(QStringLiteral("Extraction code claimed, new node %1").arg(nodeId));
+            QMessageBox::information(&window, "File received",
+                                     "The shared file was added to My files.");
+            doList(0);
+        });
         QObject::connect(boundClient, &QtClient::uploadProgress, [&](qint64 done, qint64 total) {
             const int percent = progressPercent(done, total);
             uploadProgress->setValue(percent);
@@ -459,6 +478,14 @@ int main(int argc, char **argv) {
         log->append(QStringLiteral("Uploading folder %1").arg(path));
         client->uploadDirectory(path, currentParent);
     });
+    QObject::connect(claimCodeAction, &QAction::triggered, [&]() {
+        if (!client) return;
+        bool ok = false;
+        const QString code = QInputDialog::getText(&window, "Extract shared file",
+                                                    "8-character extraction code:",
+                                                    QLineEdit::Normal, {}, &ok).trimmed();
+        if (ok && !code.isEmpty()) client->claimShareCode(code);
+    });
     QObject::connect(browser, &FileBrowser::enterDirectory,
                      [&](qint64 id, const QString &name) {
         parentStack.append(currentParent);
@@ -499,6 +526,9 @@ int main(int argc, char **argv) {
             == QMessageBox::Yes) {
             client->deleteNode(id);
         }
+    });
+    QObject::connect(browser, &FileBrowser::createShareCode, [&](qint64 id) {
+        if (client) client->createShareCode(id);
     });
     QObject::connect(browser, &FileBrowser::refreshRequested, [&]() { doList(currentParent); });
 

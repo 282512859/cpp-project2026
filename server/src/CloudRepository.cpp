@@ -5,6 +5,7 @@
 #include "cloud/common/Sha256.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fstream>
 #include <memory>
@@ -118,7 +119,16 @@ CREATE TABLE IF NOT EXISTS nodes(
  UNIQUE(owner_id,parent_id,name)
 );
 CREATE INDEX IF NOT EXISTS idx_nodes_parent ON nodes(owner_id,parent_id);
-PRAGMA user_version=1;
+CREATE TABLE IF NOT EXISTS shares(
+ code TEXT PRIMARY KEY COLLATE NOCASE,
+ owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ claimed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_shares_expires ON shares(expires_at);
+PRAGMA user_version=2;
 )sql");
 }
 
@@ -236,6 +246,90 @@ void CloudRepository::deleteNode(std::int64_t userId, std::int64_t nodeId) {
     for (const auto& [id,path] : unused) {
         std::error_code ignored; std::filesystem::remove(storageRoot_/path,ignored);
         Statement del(db_, "DELETE FROM blobs WHERE id=? AND ref_count<=0"); del.integer(1,id); del.step();
+    }
+}
+
+std::string CloudRepository::createShareCode(std::int64_t userId, std::int64_t nodeId) {
+    std::lock_guard lock(mutex_);
+    Statement file(db_, "SELECT 1 FROM nodes WHERE id=? AND owner_id=? AND is_directory=0");
+    file.integer(1, nodeId);
+    file.integer(2, userId);
+    if (file.step() != SQLITE_ROW)
+        throw ServiceError(ErrorCode::NotFound, "file not found");
+
+    constexpr auto lifetimeMillis = std::int64_t{24} * 60 * 60 * 1000;
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        const auto code = cloud::common::randomHex(4);
+        try {
+            Statement insert(db_, "INSERT INTO shares(code,owner_id,node_id,created_at,expires_at) VALUES(?,?,?,?,?)");
+            insert.text(1, code);
+            insert.integer(2, userId);
+            insert.integer(3, nodeId);
+            insert.integer(4, nowMillis());
+            insert.integer(5, nowMillis() + lifetimeMillis);
+            insert.step();
+            return code;
+        } catch (const ServiceError& e) {
+            if (std::string(e.what()).find("UNIQUE") == std::string::npos) throw;
+        }
+    }
+    throw ServiceError(ErrorCode::InternalError, "cannot allocate extraction code");
+}
+
+std::int64_t CloudRepository::claimShareCode(std::int64_t userId, const std::string& code) {
+    if (code.size() != 8 ||
+        !std::all_of(code.begin(), code.end(), [](unsigned char c) {
+            return std::isxdigit(c) != 0;
+        })) {
+        throw ServiceError(ErrorCode::BadRequest, "extraction code must contain 8 hexadecimal characters");
+    }
+
+    std::lock_guard lock(mutex_);
+    Statement share(db_, R"sql(
+SELECT s.owner_id,n.name,n.blob_id,n.size
+FROM shares s JOIN nodes n ON n.id=s.node_id
+WHERE s.code=? AND s.claimed_at IS NULL AND s.expires_at>=? AND n.is_directory=0
+)sql");
+    share.text(1, code);
+    share.integer(2, nowMillis());
+    if (share.step() != SQLITE_ROW)
+        throw ServiceError(ErrorCode::NotFound, "extraction code is invalid, expired, or already used");
+
+    const auto ownerId = sqlite3_column_int64(share.get(), 0);
+    const auto name = columnText(share.get(), 1);
+    const auto blobId = sqlite3_column_int64(share.get(), 2);
+    const auto size = sqlite3_column_int64(share.get(), 3);
+    if (ownerId == userId)
+        throw ServiceError(ErrorCode::Forbidden, "the owner cannot claim their own extraction code");
+
+    Statement conflict(db_, "SELECT 1 FROM nodes WHERE owner_id=? AND parent_id=0 AND name=?");
+    conflict.integer(1, userId);
+    conflict.text(2, name);
+    if (conflict.step() == SQLITE_ROW)
+        throw ServiceError(ErrorCode::NameConflict, "a file with this name already exists in the root directory");
+
+    exec("BEGIN IMMEDIATE");
+    try {
+        Statement increment(db_, "UPDATE blobs SET ref_count=ref_count+1 WHERE id=?");
+        increment.integer(1, blobId);
+        increment.step();
+        Statement add(db_, "INSERT INTO nodes(owner_id,parent_id,name,is_directory,blob_id,size,modified_at) VALUES(?,0,?,0,?,?,?)");
+        add.integer(1, userId);
+        add.text(2, name);
+        add.integer(3, blobId);
+        add.integer(4, size);
+        add.integer(5, nowMillis());
+        add.step();
+        const auto nodeId = sqlite3_last_insert_rowid(db_);
+        Statement claim(db_, "UPDATE shares SET claimed_at=? WHERE code=? AND claimed_at IS NULL");
+        claim.integer(1, nowMillis());
+        claim.text(2, code);
+        claim.step();
+        exec("COMMIT");
+        return nodeId;
+    } catch (...) {
+        exec("ROLLBACK");
+        throw;
     }
 }
 

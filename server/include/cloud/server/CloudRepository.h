@@ -52,6 +52,8 @@ public:
     void renameNode(std::int64_t userId, std::int64_t nodeId,
                     const std::string& name);
     void deleteNode(std::int64_t userId, std::int64_t nodeId);
+    std::string createShareCode(std::int64_t userId, std::int64_t nodeId);
+    std::int64_t claimShareCode(std::int64_t userId, const std::string& code);
 
     UploadInitResult beginUpload(std::int64_t userId, std::int64_t parentId,
                                  const std::string& name, std::int64_t size,

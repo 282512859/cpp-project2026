@@ -102,6 +102,9 @@ void FileBrowser::onContextMenuRequested(const QPoint &pos) {
     QMenu menu(this);
     menu.addAction(directory ? "Download folder" : "Download",
                    [this, id, name, directory](){ emit downloadNode(id, name, directory); });
+    if (!directory) {
+        menu.addAction("Create extraction code", [this, id](){ emit createShareCode(id); });
+    }
     menu.addAction("Rename", [this, id](){ emit renameNode(id); });
     menu.addAction("Delete", [this, id](){ emit deleteNode(id); });
     menu.addAction("Refresh", [this](){ emit refreshRequested(); });

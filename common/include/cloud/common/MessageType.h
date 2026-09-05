@@ -44,6 +44,11 @@ enum class MessageType : std::uint16_t {
     DownloadInitResp = 401,
     DownloadChunkReq = 402,
     DownloadChunk = 403,
+
+    ShareCreateReq = 500,
+    ShareCreateResp = 501,
+    ShareClaimReq = 502,
+    ShareClaimResp = 503,
 };
 
 // 标志位使用二进制的不同 bit 表示多个可以同时成立的属性。
