@@ -70,6 +70,7 @@ public:
                                            std::int64_t offset,
                                            std::size_t maxBytes,
                                            bool& final);
+    void cleanupExpiredUploads();
 
 private:
     struct UploadState {
@@ -89,6 +90,9 @@ private:
 
     void migrate();
     void exec(const std::string& sql);
+    void ensureColumn(const std::string& table, const std::string& column,
+                      const std::string& ddl);
+    void ensureQuota(std::int64_t userId, std::int64_t extraBytes);
     void requireParentDirectory(std::int64_t userId, std::int64_t parentId);
     void validateName(const std::string& name) const;
     std::filesystem::path blobPath(const std::string& sha256) const;

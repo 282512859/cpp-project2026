@@ -13,6 +13,7 @@ enum class ErrorCode {
     Forbidden,
     NotFound,
     NameConflict,
+    QuotaExceeded,
     HashMismatch,
     IoError,
     DbError,
@@ -29,6 +30,7 @@ inline constexpr std::string_view toString(ErrorCode code) {
     case ErrorCode::Forbidden: return "FORBIDDEN";
     case ErrorCode::NotFound: return "NOT_FOUND";
     case ErrorCode::NameConflict: return "NAME_CONFLICT";
+    case ErrorCode::QuotaExceeded: return "QUOTA_EXCEEDED";
     case ErrorCode::HashMismatch: return "HASH_MISMATCH";
     case ErrorCode::IoError: return "IO_ERROR";
     case ErrorCode::DbError: return "DB_ERROR";

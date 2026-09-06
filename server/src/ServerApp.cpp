@@ -6,6 +6,8 @@
 #include "cloud/common/ProtocolConstants.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -33,11 +35,31 @@ ServerApp::ServerApp(std::string address, std::uint16_t port,
 void ServerApp::run() {
     auto listener = listenTcp(address_, port_);
     std::cout << "LanCloudDrive server listening on " << address_ << ':' << port_ << '\n';
+    std::thread(&ServerApp::cleanupLoop, this).detach();
     for (;;) {
         std::string peer;
         auto client = acceptTcp(listener, &peer);
         std::cout << "client connected: " << peer << '\n';
         std::thread(&ServerApp::serveClient, this, std::move(client), std::move(peer)).detach();
+    }
+}
+
+void ServerApp::cleanupLoop() {
+    // 清理间隔（秒），可用 LANCLOUD_UPLOAD_CLEANUP_SECONDS 覆盖，默认 10 分钟。
+    const auto interval = [] {
+        if (const char* v = std::getenv("LANCLOUD_UPLOAD_CLEANUP_SECONDS")) {
+            try { const auto n = std::stoi(v); return n < 1 ? 1 : n; } catch (...) { return 600; }
+        }
+        return 600;
+    }();
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::seconds(interval));
+        try {
+            repository_.cleanupExpiredUploads();
+            std::cout << "cleaned up expired upload sessions\n";
+        } catch (const std::exception& e) {
+            std::cout << "upload cleanup failed: " << e.what() << '\n';
+        }
     }
 }
 

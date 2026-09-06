@@ -22,6 +22,7 @@ public:
 
 private:
     void serveClient(cloud::common::Socket client, std::string peer);
+    void cleanupLoop();
     cloud::common::Packet handle(const cloud::common::Packet& request);
     std::int64_t requireUser(const cloud::common::json::Object& object);
     cloud::common::Packet error(const cloud::common::Packet& request,

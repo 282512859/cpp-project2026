@@ -21,6 +21,11 @@ std::int64_t nowMillis() {
         std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+// 每个新用户的默认存储配额：10 GB。
+constexpr std::int64_t kDefaultQuotaBytes = 10LL * 1024 * 1024 * 1024;
+// 未完成上传会话在最后一次活动后保留 24 小时，超时由后台任务回收临时 .part 文件。
+constexpr std::int64_t kUploadSessionTtlMillis = 24LL * 60 * 60 * 1000;
+
 class Statement {
 public:
     Statement(sqlite3* db, const char* sql) : db_(db) {
@@ -96,6 +101,8 @@ CREATE TABLE IF NOT EXISTS users(
  username TEXT NOT NULL UNIQUE,
  password_hash TEXT NOT NULL,
  salt TEXT NOT NULL,
+ quota INTEGER NOT NULL DEFAULT 10737418240,
+ storage_used INTEGER NOT NULL DEFAULT 0,
  created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS blobs(
@@ -137,11 +144,16 @@ CREATE TABLE IF NOT EXISTS upload_session(
  expected_size INTEGER NOT NULL,
  received INTEGER NOT NULL DEFAULT 0,
  temp_path TEXT NOT NULL,
- created_at INTEGER NOT NULL
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_upload_resume ON upload_session(user_id,parent_id,name,sha256,expected_size);
 PRAGMA user_version=3;
 )sql");
+    // 旧库补列：CREATE TABLE IF NOT EXISTS 不会改动已存在的表，需显式 ALTER。
+    ensureColumn("users", "quota", "INTEGER NOT NULL DEFAULT 10737418240");
+    ensureColumn("users", "storage_used", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn("upload_session", "expires_at", "INTEGER NOT NULL DEFAULT 0");
 }
 
 void CloudRepository::validateName(const std::string& name) const {
@@ -168,8 +180,9 @@ void CloudRepository::registerUser(const std::string& username, const std::strin
     const auto salt = cloud::common::randomHex(16);
     const auto hash = cloud::common::sha256Hex(salt + password);
     try {
-        Statement insert(db_, "INSERT INTO users(username,password_hash,salt,created_at) VALUES(?,?,?,?)");
-        insert.text(1, username); insert.text(2, hash); insert.text(3, salt); insert.integer(4, nowMillis());
+        Statement insert(db_, "INSERT INTO users(username,password_hash,salt,quota,storage_used,created_at) VALUES(?,?,?,?,?,?)");
+        insert.text(1, username); insert.text(2, hash); insert.text(3, salt);
+        insert.integer(4, kDefaultQuotaBytes); insert.integer(5, 0); insert.integer(6, nowMillis());
         insert.step();
     } catch (const ServiceError& e) {
         if (std::string(e.what()).find("UNIQUE") != std::string::npos)
@@ -242,14 +255,19 @@ void CloudRepository::deleteNode(std::int64_t userId, std::int64_t nodeId) {
     exists.integer(1,nodeId); exists.integer(2,userId);
     if (exists.step()!=SQLITE_ROW) throw ServiceError(ErrorCode::NotFound, "node not found");
     std::vector<std::int64_t> blobIds;
-    Statement blobs(db_, "WITH RECURSIVE tree(id,blob_id) AS (SELECT id,blob_id FROM nodes WHERE id=? AND owner_id=? UNION ALL SELECT n.id,n.blob_id FROM nodes n JOIN tree t ON n.parent_id=t.id WHERE n.owner_id=?) SELECT blob_id FROM tree WHERE blob_id IS NOT NULL");
+    std::int64_t freedBytes = 0;
+    Statement blobs(db_, "WITH RECURSIVE tree(id,blob_id,size) AS (SELECT id,blob_id,size FROM nodes WHERE id=? AND owner_id=? UNION ALL SELECT n.id,n.blob_id,n.size FROM nodes n JOIN tree t ON n.parent_id=t.id WHERE n.owner_id=?) SELECT blob_id,size FROM tree WHERE blob_id IS NOT NULL");
     blobs.integer(1,nodeId); blobs.integer(2,userId); blobs.integer(3,userId);
-    while (blobs.step()==SQLITE_ROW) blobIds.push_back(sqlite3_column_int64(blobs.get(),0));
+    while (blobs.step()==SQLITE_ROW) {
+        blobIds.push_back(sqlite3_column_int64(blobs.get(),0));
+        freedBytes += sqlite3_column_int64(blobs.get(),1);
+    }
     exec("BEGIN IMMEDIATE");
     try {
         Statement remove(db_, "WITH RECURSIVE tree(id) AS (SELECT id FROM nodes WHERE id=? AND owner_id=? UNION ALL SELECT n.id FROM nodes n JOIN tree t ON n.parent_id=t.id WHERE n.owner_id=?) DELETE FROM nodes WHERE id IN (SELECT id FROM tree)");
         remove.integer(1,nodeId); remove.integer(2,userId); remove.integer(3,userId); remove.step();
         for (auto id : blobIds) { Statement dec(db_, "UPDATE blobs SET ref_count=ref_count-1 WHERE id=?"); dec.integer(1,id); dec.step(); }
+        if (freedBytes > 0) { Statement quc(db_, "UPDATE users SET storage_used=MAX(storage_used-?,0) WHERE id=?"); quc.integer(1,freedBytes); quc.integer(2,userId); quc.step(); }
         exec("COMMIT");
     } catch (...) { exec("ROLLBACK"); throw; }
     Statement zero(db_, "SELECT id,relative_path FROM blobs WHERE ref_count<=0");
@@ -349,12 +367,50 @@ std::filesystem::path CloudRepository::blobPath(const std::string& sha) const {
     return storageRoot_ / "blobs" / sha.substr(0,2) / sha.substr(2,2) / sha;
 }
 
+void CloudRepository::ensureColumn(const std::string& table, const std::string& column,
+                                   const std::string& ddl) {
+    Statement info(db_, ("PRAGMA table_info(" + table + ")").c_str());
+    while (info.step()==SQLITE_ROW) {
+        if (columnText(info.get(),1)==column) return;
+    }
+    exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + ddl);
+}
+
+void CloudRepository::ensureQuota(std::int64_t userId, std::int64_t extraBytes) {
+    Statement q(db_, "SELECT storage_used, quota FROM users WHERE id=?");
+    q.integer(1,userId);
+    if (q.step()!=SQLITE_ROW) throw ServiceError(ErrorCode::NotFound,"user not found");
+    const auto used=sqlite3_column_int64(q.get(),0);
+    const auto quota=sqlite3_column_int64(q.get(),1);
+    if (quota > 0 && used + extraBytes > quota)
+        throw ServiceError(ErrorCode::QuotaExceeded,"storage quota exceeded");
+}
+
+void CloudRepository::cleanupExpiredUploads() {
+    std::lock_guard lock(mutex_);
+    const auto now = nowMillis();
+    std::vector<std::string> ids, paths;
+    Statement sel(db_, "SELECT transfer_id, temp_path FROM upload_session WHERE expires_at<>0 AND expires_at<?");
+    sel.integer(1, now);
+    while (sel.step()==SQLITE_ROW) {
+        ids.push_back(columnText(sel.get(),0));
+        paths.push_back(columnText(sel.get(),1));
+    }
+    for (std::size_t i=0;i<ids.size();++i) {
+        uploads_.erase(ids[i]);
+        std::error_code ignored;
+        std::filesystem::remove(std::filesystem::path(paths[i]), ignored);
+        Statement del(db_, "DELETE FROM upload_session WHERE transfer_id=?"); del.text(1,ids[i]); del.step();
+    }
+}
+
 UploadInitResult CloudRepository::beginUpload(std::int64_t userId, std::int64_t parentId,
                                               const std::string& name, std::int64_t size,
                                               const std::string& sha) {
     validateName(name); ensureSha(sha);
     if (size < 0) throw ServiceError(ErrorCode::BadRequest, "negative file size");
     std::lock_guard lock(mutex_);
+    ensureQuota(userId, size);
     requireParentDirectory(userId,parentId);
     Statement conflict(db_, "SELECT 1 FROM nodes WHERE owner_id=? AND parent_id=? AND name=?");
     conflict.integer(1,userId); conflict.integer(2,parentId); conflict.text(3,name);
@@ -368,6 +424,8 @@ UploadInitResult CloudRepository::beginUpload(std::int64_t userId, std::int64_t 
             Statement inc(db_,"UPDATE blobs SET ref_count=ref_count+1 WHERE id=?"); inc.integer(1,blobId); inc.step();
             Statement add(db_,"INSERT INTO nodes(owner_id,parent_id,name,is_directory,blob_id,size,modified_at) VALUES(?,?,?,0,?,?,?)");
             add.integer(1,userId); add.integer(2,parentId); add.text(3,name); add.integer(4,blobId); add.integer(5,size); add.integer(6,nowMillis()); add.step();
+            Statement qinc(db_,"UPDATE users SET storage_used=storage_used+? WHERE id=? AND storage_used+?<=quota"); qinc.integer(1,size); qinc.integer(2,userId); qinc.integer(3,size); qinc.step();
+            if (sqlite3_changes(db_)==0) throw ServiceError(ErrorCode::QuotaExceeded,"storage quota exceeded");
             const auto nodeId=sqlite3_last_insert_rowid(db_); exec("COMMIT");
             return {"",true,nodeId};
         } catch (...) { exec("ROLLBACK"); throw; }
@@ -388,6 +446,7 @@ UploadInitResult CloudRepository::beginUpload(std::int64_t userId, std::int64_t 
                 received=0;
             }
             uploads_[tid]={userId,parentId,name,sha,size,received,tmp};
+            Statement touch(db_,"UPDATE upload_session SET expires_at=? WHERE transfer_id=?"); touch.integer(1,nowMillis()+kUploadSessionTtlMillis); touch.text(2,tid); touch.step();
             return {tid,false,0,received};
         }
     }
@@ -395,9 +454,9 @@ UploadInitResult CloudRepository::beginUpload(std::int64_t userId, std::int64_t 
     const auto path=storageRoot_/"temp"/(id+".part");
     { std::ofstream create(path,std::ios::binary|std::ios::trunc); if(!create) throw ServiceError(ErrorCode::IoError,"cannot create upload temp file"); }
     uploads_[id]={userId,parentId,name,sha,size,0,path};
-    Statement insert(db_,"INSERT INTO upload_session(transfer_id,user_id,parent_id,name,sha256,expected_size,received,temp_path,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
+    Statement insert(db_,"INSERT INTO upload_session(transfer_id,user_id,parent_id,name,sha256,expected_size,received,temp_path,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)");
     insert.text(1,id); insert.integer(2,userId); insert.integer(3,parentId); insert.text(4,name);
-    insert.text(5,sha); insert.integer(6,size); insert.integer(7,0); insert.text(8,path.generic_string()); insert.integer(9,nowMillis()); insert.step();
+    insert.text(5,sha); insert.integer(6,size); insert.integer(7,0); insert.text(8,path.generic_string()); insert.integer(9,nowMillis()); insert.integer(10,nowMillis()+kUploadSessionTtlMillis); insert.step();
     return {id,false,0,0};
 }
 
@@ -414,8 +473,8 @@ std::int64_t CloudRepository::appendUpload(std::int64_t userId, const std::strin
     out.write(reinterpret_cast<const char*>(data),static_cast<std::streamsize>(size));
     if(!out) throw ServiceError(ErrorCode::IoError,"cannot write upload block");
     state.received+=static_cast<std::int64_t>(size);
-    Statement progress(db_,"UPDATE upload_session SET received=? WHERE transfer_id=?");
-    progress.integer(1,state.received); progress.text(2,id); progress.step();
+    Statement progress(db_,"UPDATE upload_session SET received=?, expires_at=? WHERE transfer_id=?");
+    progress.integer(1,state.received); progress.integer(2,nowMillis()+kUploadSessionTtlMillis); progress.text(3,id); progress.step();
     return state.received;
 }
 
@@ -448,6 +507,9 @@ std::int64_t CloudRepository::finishUpload(std::int64_t userId, const std::strin
         Statement inc(db_,"UPDATE blobs SET ref_count=ref_count+1 WHERE id=?"); inc.integer(1,blobId); inc.step();
         Statement add(db_,"INSERT INTO nodes(owner_id,parent_id,name,is_directory,blob_id,size,modified_at) VALUES(?,?,?,0,?,?,?)");
         add.integer(1,state.userId); add.integer(2,state.parentId); add.text(3,state.name); add.integer(4,blobId); add.integer(5,state.expectedSize); add.integer(6,nowMillis()); add.step();
+        Statement qinc(db_,"UPDATE users SET storage_used=storage_used+? WHERE id=? AND storage_used+?<=quota");
+        qinc.integer(1,state.expectedSize); qinc.integer(2,state.userId); qinc.integer(3,state.expectedSize); qinc.step();
+        if (sqlite3_changes(db_)==0) throw ServiceError(ErrorCode::QuotaExceeded,"storage quota exceeded");
         const auto nodeId=sqlite3_last_insert_rowid(db_); exec("COMMIT"); uploads_.erase(it);
         Statement cleanup(db_,"DELETE FROM upload_session WHERE transfer_id=?"); cleanup.text(1,id); cleanup.step();
         return nodeId;
