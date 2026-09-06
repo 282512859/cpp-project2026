@@ -325,7 +325,7 @@ std::int64_t ClientCore::upload(const std::filesystem::path& localPath,
     const auto transfer = json::requireString(init, "transferId");
     const auto chunkSize =
         static_cast<std::size_t>(json::requireInt(init, "chunkSize"));
-    // 断点续传：服务端返回已收到的字节数，客户端跳过已传部分、从该偏移继续。
+    // 成员2：服务端存储 - 断点续传：服务端返回已收到的字节数，客户端跳过已传部分、从该偏移继续。
     const auto received = json::requireInt(init, "received");
     std::ifstream in(localPath, std::ios::binary);
     in.seekg(received);
@@ -398,7 +398,7 @@ void ClientCore::download(std::int64_t nodeId,
 
     auto temporary = localPath;
     temporary += ".download";
-    // 断点续传：临时文件已存在则从中断偏移续传，否则全新下载。
+    // 成员2：服务端存储 - 断点续传：临时文件已存在则从中断偏移续传，否则全新下载。
     const auto resumed = std::filesystem::exists(temporary)
         ? static_cast<std::int64_t>(std::filesystem::file_size(temporary)) : 0;
     std::ofstream out(temporary,

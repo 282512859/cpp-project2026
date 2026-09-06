@@ -22,6 +22,7 @@ public:
 
 private:
     void serveClient(cloud::common::Socket client, std::string peer);
+    // 成员2：服务端存储 - 上传会话过期清理后台线程。
     void cleanupLoop();
     cloud::common::Packet handle(const cloud::common::Packet& request);
     std::int64_t requireUser(const cloud::common::json::Object& object);

@@ -44,6 +44,7 @@ void ServerApp::run() {
     }
 }
 
+// 成员2：服务端存储 - 上传会话过期清理的后台回收线程。
 void ServerApp::cleanupLoop() {
     // 清理间隔（秒），可用 LANCLOUD_UPLOAD_CLEANUP_SECONDS 覆盖，默认 10 分钟。
     const auto interval = [] {

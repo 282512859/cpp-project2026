@@ -13,6 +13,7 @@ enum class ErrorCode {
     Forbidden,
     NotFound,
     NameConflict,
+    // 成员2：服务端存储 - 磁盘配额超限。
     QuotaExceeded,
     HashMismatch,
     IoError,
