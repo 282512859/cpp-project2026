@@ -26,6 +26,7 @@ struct UploadInitResult {
     std::string transferId;
     bool instant{};
     std::int64_t nodeId{};
+    std::int64_t received{};
 };
 
 struct DownloadInfo {

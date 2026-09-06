@@ -128,7 +128,19 @@ CREATE TABLE IF NOT EXISTS shares(
  claimed_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_shares_expires ON shares(expires_at);
-PRAGMA user_version=2;
+CREATE TABLE IF NOT EXISTS upload_session(
+ transfer_id TEXT PRIMARY KEY,
+ user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ parent_id INTEGER NOT NULL,
+ name TEXT NOT NULL,
+ sha256 TEXT NOT NULL,
+ expected_size INTEGER NOT NULL,
+ received INTEGER NOT NULL DEFAULT 0,
+ temp_path TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_upload_resume ON upload_session(user_id,parent_id,name,sha256,expected_size);
+PRAGMA user_version=3;
 )sql");
 }
 
@@ -360,11 +372,33 @@ UploadInitResult CloudRepository::beginUpload(std::int64_t userId, std::int64_t 
             return {"",true,nodeId};
         } catch (...) { exec("ROLLBACK"); throw; }
     }
+    // 断点续传：若已存在同一内容且未完成的上传会话，复用其 transferId 与已收进度。
+    {
+        Statement resume(db_, "SELECT transfer_id, received, temp_path FROM upload_session WHERE user_id=? AND parent_id=? AND name=? AND sha256=? AND expected_size=? AND received<expected_size LIMIT 1");
+        resume.integer(1,userId); resume.integer(2,parentId); resume.text(3,name);
+        resume.text(4,sha); resume.integer(5,size);
+        if (resume.step()==SQLITE_ROW) {
+            const auto tid=columnText(resume.get(),0);
+            auto received=sqlite3_column_int64(resume.get(),1);
+            auto tmp=std::filesystem::path(columnText(resume.get(),2));
+            // 临时文件缺失说明进度失效，重置为从零开始，避免读到不存在的文件。
+            if (!std::filesystem::exists(tmp)) {
+                std::ofstream create(tmp,std::ios::binary|std::ios::trunc);
+                if(!create) throw ServiceError(ErrorCode::IoError,"cannot recreate upload temp file");
+                received=0;
+            }
+            uploads_[tid]={userId,parentId,name,sha,size,received,tmp};
+            return {tid,false,0,received};
+        }
+    }
     const auto id=cloud::common::randomHex(16);
     const auto path=storageRoot_/"temp"/(id+".part");
     { std::ofstream create(path,std::ios::binary|std::ios::trunc); if(!create) throw ServiceError(ErrorCode::IoError,"cannot create upload temp file"); }
     uploads_[id]={userId,parentId,name,sha,size,0,path};
-    return {id,false,0};
+    Statement insert(db_,"INSERT INTO upload_session(transfer_id,user_id,parent_id,name,sha256,expected_size,received,temp_path,created_at) VALUES(?,?,?,?,?,?,?,?,?)");
+    insert.text(1,id); insert.integer(2,userId); insert.integer(3,parentId); insert.text(4,name);
+    insert.text(5,sha); insert.integer(6,size); insert.integer(7,0); insert.text(8,path.generic_string()); insert.integer(9,nowMillis()); insert.step();
+    return {id,false,0,0};
 }
 
 std::int64_t CloudRepository::appendUpload(std::int64_t userId, const std::string& id,
@@ -380,6 +414,8 @@ std::int64_t CloudRepository::appendUpload(std::int64_t userId, const std::strin
     out.write(reinterpret_cast<const char*>(data),static_cast<std::streamsize>(size));
     if(!out) throw ServiceError(ErrorCode::IoError,"cannot write upload block");
     state.received+=static_cast<std::int64_t>(size);
+    Statement progress(db_,"UPDATE upload_session SET received=? WHERE transfer_id=?");
+    progress.integer(1,state.received); progress.text(2,id); progress.step();
     return state.received;
 }
 
@@ -391,6 +427,7 @@ std::int64_t CloudRepository::finishUpload(std::int64_t userId, const std::strin
     if(state.received!=state.expectedSize) throw ServiceError(ErrorCode::BadRequest,"upload is incomplete");
     if(cloud::common::sha256File(state.tempPath)!=state.sha256) {
         std::filesystem::remove(state.tempPath); uploads_.erase(it);
+        Statement drop(db_,"DELETE FROM upload_session WHERE transfer_id=?"); drop.text(1,id); drop.step();
         throw ServiceError(ErrorCode::HashMismatch,"uploaded file hash does not match");
     }
     auto finalPath=blobPath(state.sha256);
@@ -411,7 +448,9 @@ std::int64_t CloudRepository::finishUpload(std::int64_t userId, const std::strin
         Statement inc(db_,"UPDATE blobs SET ref_count=ref_count+1 WHERE id=?"); inc.integer(1,blobId); inc.step();
         Statement add(db_,"INSERT INTO nodes(owner_id,parent_id,name,is_directory,blob_id,size,modified_at) VALUES(?,?,?,0,?,?,?)");
         add.integer(1,state.userId); add.integer(2,state.parentId); add.text(3,state.name); add.integer(4,blobId); add.integer(5,state.expectedSize); add.integer(6,nowMillis()); add.step();
-        const auto nodeId=sqlite3_last_insert_rowid(db_); exec("COMMIT"); uploads_.erase(it); return nodeId;
+        const auto nodeId=sqlite3_last_insert_rowid(db_); exec("COMMIT"); uploads_.erase(it);
+        Statement cleanup(db_,"DELETE FROM upload_session WHERE transfer_id=?"); cleanup.text(1,id); cleanup.step();
+        return nodeId;
     } catch (...) { exec("ROLLBACK"); throw; }
 }
 

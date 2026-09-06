@@ -10,8 +10,7 @@ option(LANCLOUD_BUILD_TESTS "Build first-version tests" ON)
 
 if(MSVC)
     add_compile_options(/W4 /permissive- /utf-8)
-    # /MT and /MTd keep the release package independent of the VC runtime DLL.
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    # MSVC 默认动态运行时（/MD、/MDd），与 Qt 官方预编译包一致，避免两套堆冲突。
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()

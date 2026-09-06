@@ -154,7 +154,8 @@ Packet ServerApp::handle(const Packet& request) {
             const auto result=repository_.beginUpload(user,json::requireInt(body,"parentId"),json::requireString(body,"name"),json::requireInt(body,"size"),json::requireString(body,"sha256"));
             return makeJsonPacket(MessageType::UploadInitResp,request.header.requestId,
                 json::object({{"transferId",json::quote(result.transferId)},{"instant",boolean(result.instant)},
-                              {"nodeId",std::to_string(result.nodeId)},{"chunkSize",std::to_string(kDefaultChunkSize)}}),FlagResponse);
+                              {"nodeId",std::to_string(result.nodeId)},{"chunkSize",std::to_string(kDefaultChunkSize)},
+                              {"received",std::to_string(result.received)}}),FlagResponse);
         }
         case MessageType::UploadFinishReq: {
             const auto user=requireUser(body); const auto id=repository_.finishUpload(user,json::requireString(body,"transferId"));
