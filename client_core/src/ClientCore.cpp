@@ -290,6 +290,17 @@ DocumentPreview ClientCore::preview(std::int64_t nodeId, std::int64_t maxBytes) 
             json::requireBool(response, "truncated")};
 }
 
+PreviewAsset ClientCore::previewAsset(std::int64_t nodeId, std::int64_t page) {
+    auto response=request(MessageType::PreviewAssetReq,
+                          authJson({{"nodeId",std::to_string(nodeId)},
+                                    {"page",std::to_string(page)}}));
+    if(response.header.type!=MessageType::PreviewAssetResp ||
+       (response.header.flags&FlagBinary)==0) {
+        throw std::runtime_error("invalid preview asset response");
+    }
+    return {{},std::move(response.body)};
+}
+
 /**
  * @brief 完成本地文件检查、秒传协商、分块发送和上传确认。
  * @param localPath 本地源文件路径，必须指向普通文件。

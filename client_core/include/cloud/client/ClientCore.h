@@ -41,6 +41,11 @@ struct DocumentPreview {
     bool truncated{};
 };
 
+struct PreviewAsset {
+    std::string name;
+    std::vector<std::uint8_t> bytes;
+};
+
 /**
  * @brief 服务端明确返回错误响应时抛出的异常。
  *
@@ -184,6 +189,7 @@ public:
     std::int64_t convertToMarkdown(std::int64_t nodeId,
                                    const std::string& outputName = {});
     DocumentPreview preview(std::int64_t nodeId, std::int64_t maxBytes = 512 * 1024);
+    PreviewAsset previewAsset(std::int64_t nodeId, std::int64_t page = 1);
 
     /**
      * @brief 把一个本地普通文件分块上传到远程目录。

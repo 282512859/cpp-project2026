@@ -52,8 +52,10 @@ cmake --build --preset windows-debug-qt
 - 记住上一次使用的服务端地址和端口；
 - 网络与文件操作放在独立 Qt 工作线程中，避免阻塞界面。
 - 右键单个文件生成 8 位提取码，并在另一台客户端领取文件。
-- 单击文件可直接预览文本、Markdown 和常见代码文件；DOCX、文字型 PDF 会在服务端临时转换后展示，不会产生额外文件。
+- 单击文件可直接预览文本、Markdown 和常见代码文件；C/C++、Python、JSON、CMake、YAML、TEX 使用等宽字体阅读模式。
+- CSV/TSV 文件以表格方式展示；PNG、JPEG、BMP、GIF、SVG 直接显示，PDF 在预览区提供分页查看。
 - 需要保留转换结果时，可右键 DOCX/PDF 选择 `Save as Markdown`，将 Markdown 文件写入原文件所在目录。
+- 图片（PNG/JPEG/BMP/GIF/SVG）在右侧阅读区直接显示；PDF 会渲染第一页并显示在同一阅读区。
 
 ## 用提取码传递文件
 
@@ -80,6 +82,7 @@ cmake --build --preset windows-debug-qt
 - 上传会话过期自动清理：后台线程周期回收过期的会话及其临时 `.part` 文件，活跃会话不受影响；
 - 拒绝路径穿越名称，服务端真实存储路径不直接使用用户文件名。
 - 支持服务端临时预览 `.docx` 和文字型 `.pdf`，以及按需将其转换为同目录 Markdown 文件。
+- PDF 页面预览依赖 Poppler 的 `pdftoppm.exe`：发布时将它放在服务端 `tools` 目录，或设置 `LANCLOUD_PDFTOPPM` 为其完整路径。
 
 ## 系统结构
 

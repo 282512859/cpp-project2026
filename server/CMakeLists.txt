@@ -21,6 +21,18 @@ else()
     target_link_libraries(cloud_server PRIVATE "${LANCLOUD_SQLITE_LIBRARY}")
 endif()
 
+set(LANCLOUD_PDFTOPPM_EXE
+    "${PROJECT_SOURCE_DIR}/out/tools/pdftoppm.exe"
+    CACHE FILEPATH "Path to the pdftoppm PDF preview renderer")
+if(EXISTS "${LANCLOUD_PDFTOPPM_EXE}")
+    add_custom_command(TARGET cloud_server POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:cloud_server>/tools"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${LANCLOUD_PDFTOPPM_EXE}"
+                "$<TARGET_FILE_DIR:cloud_server>/tools/pdftoppm.exe")
+    install(PROGRAMS "${LANCLOUD_PDFTOPPM_EXE}" DESTINATION tools)
+endif()
+
 install(TARGETS cloud_server RUNTIME DESTINATION bin)
 
 set(LANCLOUD_DOCUMENT_CONVERTER_EXE

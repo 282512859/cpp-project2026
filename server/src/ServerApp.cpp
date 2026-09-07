@@ -5,6 +5,7 @@
 #include "cloud/common/ExecutablePath.h"
 #include "cloud/common/MessageType.h"
 #include "cloud/common/ProtocolConstants.h"
+#include "cloud/common/Sha256.h"
 
 #include <algorithm>
 #include <chrono>
@@ -14,6 +15,10 @@
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace cloud::server {
 namespace {
@@ -64,6 +69,12 @@ bool isTextPreviewable(const std::string& name) {
            extension==".yml" || extension==".yaml";
 }
 
+bool isImagePreviewable(const std::string& name) {
+    const auto extension=lowerExtension(name);
+    return extension==".png" || extension==".jpg" || extension==".jpeg" ||
+           extension==".bmp" || extension==".gif" || extension==".svg";
+}
+
 std::string readPreviewText(const std::filesystem::path& path,
                             std::size_t maxBytes,bool& truncated) {
     std::ifstream input(path,std::ios::binary);
@@ -73,6 +84,85 @@ std::string readPreviewText(const std::filesystem::path& path,
     content.resize(static_cast<std::size_t>(input.gcount()));
     truncated=input.peek()!=std::char_traits<char>::eof();
     return content;
+}
+
+std::vector<std::uint8_t> readPreviewAsset(const std::filesystem::path& path) {
+    std::error_code sizeError;
+    const auto size=std::filesystem::file_size(path,sizeError);
+    if(sizeError) throw ServiceError(ErrorCode::IoError,"cannot read preview asset");
+    if(size>kMaxBodySize)
+        throw ServiceError(ErrorCode::BadRequest,"preview asset exceeds the 4 MiB protocol limit");
+    std::ifstream input(path,std::ios::binary);
+    if(!input) throw ServiceError(ErrorCode::IoError,"cannot open preview asset");
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    input.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
+    if(input.gcount()!=static_cast<std::streamsize>(bytes.size()))
+        throw ServiceError(ErrorCode::IoError,"cannot read preview asset");
+    return bytes;
+}
+
+#ifdef _WIN32
+std::wstring quotePreviewArgument(const std::wstring& value) {
+    std::wstring result=L"\"";
+    for(const auto character:value) {
+        if(character==L'\"') result+=L"\\\"";
+        else result.push_back(character);
+    }
+    return result+L"\"";
+}
+
+void renderPdfFirstPage(const std::filesystem::path& source,
+                        const std::filesystem::path& outputBase,
+                        std::int64_t page) {
+    const auto executable=cloud::common::executableDirectory();
+    auto renderer=executable/"tools"/"pdftoppm.exe";
+    if(!std::filesystem::is_regular_file(renderer)) {
+        if(const auto configured=std::getenv("LANCLOUD_PDFTOPPM")) renderer=configured;
+        else renderer="pdftoppm.exe";
+    }
+    auto command=quotePreviewArgument(renderer.wstring())+
+        L" -f "+std::to_wstring(page)+L" -l "+std::to_wstring(page)+
+        L" -singlefile -png -scale-to-x 1400 -scale-to-y -1 "+
+        quotePreviewArgument(source.wstring())+L" "+quotePreviewArgument(outputBase.wstring());
+    STARTUPINFOW startup{};
+    startup.cb=sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if(!CreateProcessW(nullptr,command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,
+                       nullptr,nullptr,&startup,&process)) {
+        throw ServiceError(ErrorCode::InternalError,
+                           "PDF preview renderer is missing; install pdftoppm or set LANCLOUD_PDFTOPPM");
+    }
+    CloseHandle(process.hThread);
+    const auto wait=WaitForSingleObject(process.hProcess,30000);
+    DWORD exitCode=1;
+    GetExitCodeProcess(process.hProcess,&exitCode);
+    CloseHandle(process.hProcess);
+    if(wait==WAIT_TIMEOUT || exitCode!=0)
+        throw ServiceError(ErrorCode::BadRequest,"PDF first-page rendering failed");
+}
+#endif
+
+std::vector<std::uint8_t> renderPdfPreview(const std::filesystem::path& source,
+                                           std::int64_t page) {
+#ifdef _WIN32
+    const auto work=std::filesystem::temp_directory_path()/
+        ("lancloud-pdf-preview-"+cloud::common::randomHex(16));
+    std::filesystem::create_directories(work);
+    try {
+        const auto outputBase=work/"page";
+        renderPdfFirstPage(source,outputBase,page);
+        const auto bytes=readPreviewAsset(work/"page.png");
+        std::error_code ignored;
+        std::filesystem::remove_all(work,ignored);
+        return bytes;
+    } catch(...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(work,ignored);
+        throw;
+    }
+#else
+    throw ServiceError(ErrorCode::InternalError,"PDF page preview is currently available on Windows only");
+#endif
 }
 
 } // namespace
@@ -289,6 +379,22 @@ Packet ServerApp::handle(const Packet& request) {
                               {"content",json::quote(content)},
                               {"markdown",boolean(markdown)},
                               {"truncated",boolean(truncated)}}),FlagResponse);
+        }
+        case MessageType::PreviewAssetReq: {
+            const auto user=requireUser(body);
+            const auto source=repository_.getStoredFile(user,json::requireInt(body,"nodeId"));
+            const auto extension=lowerExtension(source.name);
+            std::vector<std::uint8_t> bytes;
+            const auto page=json::requireInt(body,"page");
+            if(page<1) throw ServiceError(ErrorCode::BadRequest,"preview page must be positive");
+            if(isImagePreviewable(source.name)) {
+                if(page!=1) throw ServiceError(ErrorCode::BadRequest,"image preview has only one page");
+                bytes=readPreviewAsset(source.blobPath);
+            } else if(extension==".pdf") bytes=renderPdfPreview(source.blobPath,page);
+            else throw ServiceError(ErrorCode::BadRequest,
+                "visual preview supports PNG, JPEG, BMP, GIF, SVG, and PDF files");
+            return makePacket(MessageType::PreviewAssetResp,request.header.requestId,
+                              std::move(bytes),FlagResponse|FlagBinary);
         }
         default: throw ServiceError(ErrorCode::BadRequest,"unsupported message type");
         }

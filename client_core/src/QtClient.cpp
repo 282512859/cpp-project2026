@@ -182,6 +182,20 @@ void ClientWorker::doPreview(qint64 nodeId) {
     }
 }
 
+void ClientWorker::doPreviewAsset(qint64 nodeId, const QString &title, qint64 page) {
+    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    try {
+        const auto result=core_->previewAsset(static_cast<std::int64_t>(nodeId),
+                                              static_cast<std::int64_t>(page));
+        emit previewAssetReady(title,QByteArray(reinterpret_cast<const char*>(result.bytes.data()),
+                                                static_cast<qsizetype>(result.bytes.size())));
+    } catch (const ClientError &e) {
+        emit error(QString::fromStdString(e.code()), QString::fromLocal8Bit(e.what()));
+    } catch (const std::exception &e) {
+        emit error("EXCEPTION", QString::fromLocal8Bit(e.what()));
+    }
+}
+
 void ClientWorker::doConvertToMarkdown(qint64 nodeId) {
     if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
     try {
@@ -334,6 +348,7 @@ QtClient::QtClient(const QString &host, quint16 port, QObject *parent)
     connect(this, &QtClient::invokeCreateShareCode, worker_, &ClientWorker::doCreateShareCode, Qt::QueuedConnection);
     connect(this, &QtClient::invokeClaimShareCode, worker_, &ClientWorker::doClaimShareCode, Qt::QueuedConnection);
     connect(this, &QtClient::invokePreview, worker_, &ClientWorker::doPreview, Qt::QueuedConnection);
+    connect(this, &QtClient::invokePreviewAsset, worker_, &ClientWorker::doPreviewAsset, Qt::QueuedConnection);
     connect(this, &QtClient::invokeConvertToMarkdown, worker_, &ClientWorker::doConvertToMarkdown, Qt::QueuedConnection);
     connect(this, &QtClient::invokeUpload, worker_, &ClientWorker::doUpload, Qt::QueuedConnection);
     connect(this, &QtClient::invokeUploadDirectory, worker_, &ClientWorker::doUploadDirectory,
@@ -354,6 +369,7 @@ QtClient::QtClient(const QString &host, quint16 port, QObject *parent)
     connect(worker_, &ClientWorker::shareCodeCreated, this, &QtClient::shareCodeCreated, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::shareCodeClaimed, this, &QtClient::shareCodeClaimed, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::previewReady, this, &QtClient::previewReady, Qt::QueuedConnection);
+    connect(worker_, &ClientWorker::previewAssetReady, this, &QtClient::previewAssetReady, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::markdownSaved, this, &QtClient::markdownSaved, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::uploadProgress, this, &QtClient::uploadProgress, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::uploadFinished, this, &QtClient::uploadFinished, Qt::QueuedConnection);
@@ -408,6 +424,10 @@ void QtClient::claimShareCode(const QString &code) {
 
 void QtClient::preview(qint64 nodeId) {
     emit invokePreview(nodeId);
+}
+
+void QtClient::previewAsset(qint64 nodeId, const QString &title, qint64 page) {
+    emit invokePreviewAsset(nodeId,title,page);
 }
 
 void QtClient::convertToMarkdown(qint64 nodeId) {

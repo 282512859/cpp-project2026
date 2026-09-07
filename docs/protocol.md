@@ -28,6 +28,7 @@
 | 500～503 | SHARE_CREATE / SHARE_CLAIM 请求/响应 |
 | 600～601 | CONVERT_REQ / CONVERT_RESP |
 | 610～611 | PREVIEW_REQ / PREVIEW_RESP |
+| 612～613 | PREVIEW_ASSET_REQ / PREVIEW_ASSET_RESP |
 
 失败统一响应 `ERROR_RESP`，设置 `RESPONSE|ERROR`，并返回：
 
@@ -97,6 +98,19 @@
 
 `markdown=true` 表示客户端应按 Markdown 渲染；`truncated=true` 表示内容被 512 KiB
 上限截断。图片、音视频、压缩包和二进制文件返回 `BAD_REQUEST`，客户端显示错误信息。
+
+## 视觉预览资源
+
+客户端发送 `PREVIEW_ASSET_REQ`：
+
+```json
+{"token":"...","nodeId":12,"page":1}
+```
+
+`page` 从 1 开始；图片只允许请求第 1 页，PDF 可按页请求。服务端对 PNG、JPEG、BMP、
+GIF、SVG 直接返回原始文件字节；对 PDF 使用 `pdftoppm` 将请求页渲染为 PNG。成功响应
+为 `PREVIEW_ASSET_RESP`，设置 `RESPONSE|BINARY`，正文为图片字节。资源必须不超过 4 MiB
+的报文上限；超过上限或页码不存在时返回 `BAD_REQUEST`，用户可下载原文件查看。
 
 ## 限制
 

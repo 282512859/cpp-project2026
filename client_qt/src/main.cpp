@@ -1,22 +1,30 @@
 #include <QAction>
+#include <QAbstractItemView>
 #include <QApplication>
 #include <QClipboard>
 #include <QFileDialog>
 #include <QFrame>
+#include <QFontDatabase>
+#include <QHeaderView>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QPlainTextEdit>
+#include <QPixmap>
 #include <QRegularExpression>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QSplitter>
 #include <QTextEdit>
 #include <QToolBar>
+#include <QTableWidget>
 #include <QVBoxLayout>
 #include <QVector>
 #include <QWidget>
@@ -54,6 +62,36 @@ QLabel *makeLabel(const QString &text, const char *name) {
     auto *label = new QLabel(text);
     label->setObjectName(name);
     return label;
+}
+
+bool visualPreviewable(const QString &name) {
+    const auto extension=name.section('.',-1).toLower();
+    return extension=="png" || extension=="jpg" || extension=="jpeg" ||
+           extension=="bmp" || extension=="gif" || extension=="svg" ||
+           extension=="pdf";
+}
+
+bool codePreviewable(const QString &name) {
+    const auto extension=name.section('.',-1).toLower();
+    return extension=="cpp" || extension=="c" || extension=="h" || extension=="hpp" ||
+           extension=="py" || extension=="json" || extension=="cmake" || extension=="yml" ||
+           extension=="yaml" || extension=="tex";
+}
+
+QList<QString> splitTableRow(const QString &line, QChar separator) {
+    QList<QString> fields;
+    QString field;
+    bool quoted=false;
+    for (int i=0; i<line.size(); ++i) {
+        const auto character=line.at(i);
+        if (character=='"' && quoted && i+1<line.size() && line.at(i+1)=='"') {
+            field+='"'; ++i;
+        } else if (character=='"') quoted=!quoted;
+        else if (character==separator && !quoted) { fields.append(field); field.clear(); }
+        else field+=character;
+    }
+    fields.append(field);
+    return fields;
 }
 
 } // namespace
@@ -276,7 +314,8 @@ int main(int argc, char **argv) {
     fileLayout->addLayout(fileHeading);
     fileLayout->addWidget(browser, 1);
 
-    auto *sideColumn = new QVBoxLayout();
+    auto *previewColumn = new QWidget();
+    auto *sideColumn = new QVBoxLayout(previewColumn);
     sideColumn->setSpacing(12);
     auto *transferSurface = makeSurface("sideSurface");
     auto *transferLayout = new QVBoxLayout(transferSurface);
@@ -305,24 +344,61 @@ int main(int argc, char **argv) {
     log->setPlaceholderText("Recent activity appears here");
     activityLayout->addWidget(log);
     auto *previewSurface = makeSurface("sideSurface");
-    previewSurface->setMinimumWidth(300);
-    previewSurface->setMaximumWidth(360);
     auto *previewLayout = new QVBoxLayout(previewSurface);
     previewLayout->setContentsMargins(16, 15, 16, 16);
     previewLayout->setSpacing(6);
     previewLayout->addWidget(makeLabel("Preview", "sectionTitle"));
     auto *previewTitle = makeLabel("Select a file", "muted");
+    auto *pdfControls = new QWidget();
+    auto *pdfControlLayout = new QHBoxLayout(pdfControls);
+    pdfControlLayout->setContentsMargins(0,0,0,0);
+    auto *previousPageButton = new QPushButton("Previous");
+    previousPageButton->setObjectName("secondaryButton");
+    auto *pdfPageLabel = makeLabel("Page 1", "muted");
+    auto *nextPageButton = new QPushButton("Next");
+    nextPageButton->setObjectName("secondaryButton");
+    pdfControlLayout->addWidget(previousPageButton);
+    pdfControlLayout->addWidget(pdfPageLabel,1,Qt::AlignCenter);
+    pdfControlLayout->addWidget(nextPageButton);
+    pdfControls->hide();
+    auto *previewPages = new QStackedWidget();
+    auto *previewEmpty = makeLabel("Select a file to view its contents.", "muted");
+    previewEmpty->setAlignment(Qt::AlignCenter);
     auto *previewText = new QTextEdit();
     previewText->setReadOnly(true);
     previewText->setPlaceholderText("Select a text or Markdown file to preview its content.");
-    previewText->setMinimumHeight(190);
+    auto *previewCode = new QPlainTextEdit();
+    previewCode->setReadOnly(true);
+    previewCode->setLineWrapMode(QPlainTextEdit::NoWrap);
+    previewCode->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    auto *previewTable = new QTableWidget();
+    previewTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    previewTable->setAlternatingRowColors(true);
+    previewTable->horizontalHeader()->setStretchLastSection(true);
+    auto *previewImage = new QLabel();
+    previewImage->setAlignment(Qt::AlignCenter);
+    auto *previewImageScroll = new QScrollArea();
+    previewImageScroll->setWidget(previewImage);
+    previewImageScroll->setWidgetResizable(false);
+    previewImageScroll->setAlignment(Qt::AlignCenter);
+    previewPages->addWidget(previewEmpty);
+    previewPages->addWidget(previewText);
+    previewPages->addWidget(previewCode);
+    previewPages->addWidget(previewTable);
+    previewPages->addWidget(previewImageScroll);
     previewLayout->addWidget(previewTitle);
-    previewLayout->addWidget(previewText, 1);
-    sideColumn->addWidget(previewSurface, 2);
+    previewLayout->addWidget(pdfControls);
+    previewLayout->addWidget(previewPages, 1);
+    sideColumn->addWidget(previewSurface, 5);
     sideColumn->addWidget(transferSurface);
     sideColumn->addWidget(activitySurface, 1);
-    bodyLayout->addWidget(fileSurface, 3);
-    bodyLayout->addLayout(sideColumn, 1);
+    auto *contentSplitter = new QSplitter(Qt::Horizontal);
+    contentSplitter->addWidget(fileSurface);
+    contentSplitter->addWidget(previewColumn);
+    contentSplitter->setStretchFactor(0, 3);
+    contentSplitter->setStretchFactor(1, 2);
+    contentSplitter->setSizes({690, 460});
+    bodyLayout->addWidget(contentSplitter, 1);
     workspacePageLayout->addWidget(workspaceBody, 1);
 
     pages->addWidget(loginPage);
@@ -333,6 +409,9 @@ int main(int argc, char **argv) {
     qint64 currentParent = 0;
     QVector<qint64> parentStack;
     QStringList pathNames;
+    qint64 previewNodeId = 0;
+    qint64 previewPdfPage = 1;
+    bool previewingPdf = false;
 
     const auto updateLocation = [&]() {
         locationLabel->setText(pathNames.isEmpty()
@@ -369,6 +448,11 @@ int main(int argc, char **argv) {
         QObject::connect(boundClient, &QtClient::errorOccurred,
                          [&](const QString &code, const QString &message) {
             log->append(QStringLiteral("ERROR [%1] %2").arg(code, message));
+            if (previewingPdf && code == "BAD_REQUEST" && previewPdfPage > 1) {
+                --previewPdfPage;
+                pdfPageLabel->setText(QStringLiteral("Page %1").arg(previewPdfPage));
+                nextPageButton->setEnabled(false);
+            }
             if (pages->currentWidget() == loginPage) {
                 loginStatus->setStyleSheet("color: #cf222e;");
                 loginStatus->setText(QStringLiteral("%1: %2").arg(code, message));
@@ -417,12 +501,58 @@ int main(int argc, char **argv) {
         QObject::connect(boundClient, &QtClient::previewReady,
                          [&](const QString &title, const QString &content, bool markdown, bool truncated) {
             previewTitle->setText(title);
+            pdfControls->hide();
             const auto visibleContent=content + (truncated
                 ? QStringLiteral("\n\n[Preview limited to the first 512 KiB]")
                 : QString());
-            if (markdown) previewText->setMarkdown(visibleContent);
-            else previewText->setPlainText(visibleContent);
+            const auto extension=title.section('.',-1).toLower();
+            if (codePreviewable(title)) {
+                previewCode->setPlainText(visibleContent);
+                previewPages->setCurrentWidget(previewCode);
+            } else if (extension=="csv" || extension=="tsv") {
+                const auto rows=visibleContent.split('\n',Qt::SkipEmptyParts);
+                const auto separator=extension=="tsv" ? QChar('\t') : QChar(',');
+                const auto headers=rows.isEmpty() ? QList<QString>{} : splitTableRow(rows.first(),separator);
+                const int columnCount=headers.size()>50 ? 50 : static_cast<int>(headers.size());
+                previewTable->clear();
+                previewTable->setColumnCount(columnCount);
+                const int rowCount=rows.size()>1001 ? 1000 : static_cast<int>(rows.size()>0 ? rows.size()-1 : 0);
+                previewTable->setRowCount(rowCount);
+                for (int column=0; column<columnCount; ++column)
+                    previewTable->setHorizontalHeaderItem(column,new QTableWidgetItem(headers.at(column)));
+                for (int row=0; row<previewTable->rowCount(); ++row) {
+                    const auto fields=splitTableRow(rows.at(row+1),separator);
+                    const int fieldCount=fields.size()>columnCount ? columnCount : static_cast<int>(fields.size());
+                    for (int column=0; column<fieldCount; ++column)
+                        previewTable->setItem(row,column,new QTableWidgetItem(fields.at(column)));
+                }
+                previewPages->setCurrentWidget(previewTable);
+            } else {
+                if (markdown) previewText->setMarkdown(visibleContent);
+                else previewText->setPlainText(visibleContent);
+                previewPages->setCurrentWidget(previewText);
+            }
             if (markdown) log->append(QStringLiteral("Markdown preview loaded: %1").arg(title));
+        });
+        QObject::connect(boundClient, &QtClient::previewAssetReady,
+                         [&](const QString &title, const QByteArray &bytes) {
+            QPixmap pixmap;
+            if (!pixmap.loadFromData(bytes)) {
+                previewTitle->setText(title);
+                previewText->setPlainText("The server returned an unreadable preview image.");
+                previewPages->setCurrentWidget(previewText);
+                return;
+            }
+            previewTitle->setText(title);
+            const auto scaled=pixmap.scaled(previewImageScroll->viewport()->size(),
+                                            Qt::KeepAspectRatio,Qt::SmoothTransformation);
+            previewImage->setPixmap(scaled);
+            previewImage->resize(scaled.size());
+            previewPages->setCurrentWidget(previewImageScroll);
+            pdfControls->setVisible(previewingPdf);
+            previousPageButton->setEnabled(previewPdfPage > 1);
+            nextPageButton->setEnabled(true);
+            pdfPageLabel->setText(QStringLiteral("Page %1").arg(previewPdfPage));
         });
         QObject::connect(boundClient, &QtClient::markdownSaved, [&](qint64 nodeId) {
             log->append(QStringLiteral("Markdown file saved, node %1").arg(nodeId));
@@ -583,14 +713,38 @@ int main(int argc, char **argv) {
                      [&](qint64 id, const QString &name, bool directory, qint64 size) {
         previewTitle->setText(name);
         if (directory) {
-            previewText->setPlainText("Folder selected. Double-click to open it.");
+            previewingPdf=false;
+            pdfControls->hide();
+            previewEmpty->setText("Folder selected. Double-click to open it.");
+            previewPages->setCurrentWidget(previewEmpty);
         } else if (client) {
-            previewText->setPlainText(QStringLiteral("Loading preview (%1 bytes)...").arg(size));
-            client->preview(id);
+            previewNodeId=id;
+            previewPdfPage=1;
+            previewingPdf=name.endsWith(".pdf",Qt::CaseInsensitive);
+            if (visualPreviewable(name)) {
+                previewEmpty->setText(QStringLiteral("Loading visual preview (%1 bytes)...").arg(size));
+                previewPages->setCurrentWidget(previewEmpty);
+                client->previewAsset(id,name,previewPdfPage);
+            } else {
+                pdfControls->hide();
+                previewText->setPlainText(QStringLiteral("Loading preview (%1 bytes)...").arg(size));
+                previewPages->setCurrentWidget(previewText);
+                client->preview(id);
+            }
         }
     });
     QObject::connect(browser, &FileBrowser::convertToMarkdown, [&](qint64 id) {
         if (client) client->convertToMarkdown(id);
+    });
+    QObject::connect(previousPageButton, &QPushButton::clicked, [&]() {
+        if (!client || !previewingPdf || previewPdfPage <= 1) return;
+        --previewPdfPage;
+        client->previewAsset(previewNodeId,previewTitle->text(),previewPdfPage);
+    });
+    QObject::connect(nextPageButton, &QPushButton::clicked, [&]() {
+        if (!client || !previewingPdf) return;
+        ++previewPdfPage;
+        client->previewAsset(previewNodeId,previewTitle->text(),previewPdfPage);
     });
     QObject::connect(browser, &FileBrowser::refreshRequested, [&]() { doList(currentParent); });
 
