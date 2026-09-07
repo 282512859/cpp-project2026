@@ -42,6 +42,8 @@ public slots:
     void doDelete(qint64 nodeId);
     void doCreateShareCode(qint64 nodeId);
     void doClaimShareCode(const QString &code);
+    void doPreview(qint64 nodeId);
+    void doConvertToMarkdown(qint64 nodeId);
     void doUpload(const QString &localPath, qint64 parentId, const QString &remoteName);
     void doUploadDirectory(const QString &localPath, qint64 parentId);
     void doDownload(qint64 nodeId, const QString &localPath);
@@ -59,6 +61,8 @@ signals:
     void deleteFinished();
     void shareCodeCreated(const QString &code);
     void shareCodeClaimed(qint64 nodeId);
+    void previewReady(const QString &title, const QString &content, bool markdown, bool truncated);
+    void markdownSaved(qint64 nodeId);
     void uploadProgress(qint64 done, qint64 total);
     void uploadFinished(qint64 nodeId);
     void downloadProgress(qint64 done, qint64 total);
@@ -83,6 +87,8 @@ public:
     Q_INVOKABLE void deleteNode(qint64 nodeId);
     Q_INVOKABLE void createShareCode(qint64 nodeId);
     Q_INVOKABLE void claimShareCode(const QString &code);
+    Q_INVOKABLE void preview(qint64 nodeId);
+    Q_INVOKABLE void convertToMarkdown(qint64 nodeId);
     Q_INVOKABLE void upload(const QString &localPath, qint64 parentId, const QString &remoteName = QString());
     Q_INVOKABLE void uploadDirectory(const QString &localPath, qint64 parentId);
     Q_INVOKABLE void download(qint64 nodeId, const QString &localPath);
@@ -100,6 +106,8 @@ signals: // public signals for UI
     void deleteFinished();
     void shareCodeCreated(const QString &code);
     void shareCodeClaimed(qint64 nodeId);
+    void previewReady(const QString &title, const QString &content, bool markdown, bool truncated);
+    void markdownSaved(qint64 nodeId);
     void uploadProgress(qint64 done, qint64 total);
     void uploadFinished(qint64 nodeId);
     void downloadProgress(qint64 done, qint64 total);
@@ -120,6 +128,8 @@ signals:
     void invokeDelete(qint64 nodeId);
     void invokeCreateShareCode(qint64 nodeId);
     void invokeClaimShareCode(const QString &code);
+    void invokePreview(qint64 nodeId);
+    void invokeConvertToMarkdown(qint64 nodeId);
     void invokeUpload(const QString &localPath, qint64 parentId, const QString &remoteName);
     void invokeUploadDirectory(const QString &localPath, qint64 parentId);
     void invokeDownload(qint64 nodeId, const QString &localPath);

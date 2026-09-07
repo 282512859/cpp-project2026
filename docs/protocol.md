@@ -27,6 +27,7 @@
 | 400～403 | DOWNLOAD_INIT、DOWNLOAD_CHUNK_REQ/CHUNK |
 | 500～503 | SHARE_CREATE / SHARE_CLAIM 请求/响应 |
 | 600～601 | CONVERT_REQ / CONVERT_RESP |
+| 610～611 | PREVIEW_REQ / PREVIEW_RESP |
 
 失败统一响应 `ERROR_RESP`，设置 `RESPONSE|ERROR`，并返回：
 
@@ -76,6 +77,26 @@
 ```
 
 转换是同步操作；源文件最大 100 MiB，转换结果最大 64 MiB，后台转换最长运行 120 秒。
+
+## 文件预览
+
+客户端发送 `PREVIEW_REQ`：
+
+```json
+{"token":"...","nodeId":12,"maxBytes":524288}
+```
+
+服务端只读取请求文件的前 `maxBytes` 字节，实际范围限制为 1 B 到 512 KiB。`.txt`、
+`.md`、常见 C/C++、JSON、日志、CSV、Python、CMake 与 YAML 文件直接返回；`.docx` 和
+文字型 `.pdf` 通过同一 MarkItDown 组件临时转换后返回，临时文件在响应完成后清理，不会
+创建网盘节点。成功响应 `PREVIEW_RESP`：
+
+```json
+{"name":"报告.docx","content":"# 报告\n...","markdown":true,"truncated":false}
+```
+
+`markdown=true` 表示客户端应按 Markdown 渲染；`truncated=true` 表示内容被 512 KiB
+上限截断。图片、音视频、压缩包和二进制文件返回 `BAD_REQUEST`，客户端显示错误信息。
 
 ## 限制
 

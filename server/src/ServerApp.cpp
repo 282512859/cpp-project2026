@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cctype>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -45,6 +46,33 @@ bool endsWithMarkdownExtension(const std::string& name) {
 std::string defaultMarkdownName(const std::string& sourceName) {
     const auto dot=sourceName.find_last_of('.');
     return sourceName.substr(0,dot==std::string::npos?sourceName.size():dot)+".md";
+}
+
+std::string lowerExtension(const std::string& name) {
+    auto extension=std::filesystem::path(name).extension().string();
+    std::transform(extension.begin(),extension.end(),extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension;
+}
+
+bool isTextPreviewable(const std::string& name) {
+    const auto extension=lowerExtension(name);
+    return extension==".txt" || extension==".md" || extension==".markdown" ||
+           extension==".cpp" || extension==".c" || extension==".h" ||
+           extension==".hpp" || extension==".json" || extension==".log" ||
+           extension==".csv" || extension==".py" || extension==".cmake" ||
+           extension==".yml" || extension==".yaml";
+}
+
+std::string readPreviewText(const std::filesystem::path& path,
+                            std::size_t maxBytes,bool& truncated) {
+    std::ifstream input(path,std::ios::binary);
+    if(!input) throw ServiceError(ErrorCode::IoError,"cannot read preview source");
+    std::string content(maxBytes,'\0');
+    input.read(content.data(),static_cast<std::streamsize>(content.size()));
+    content.resize(static_cast<std::size_t>(input.gcount()));
+    truncated=input.peek()!=std::char_traits<char>::eof();
+    return content;
 }
 
 } // namespace
@@ -235,6 +263,32 @@ Packet ServerApp::handle(const Packet& request) {
             return makeJsonPacket(MessageType::ConvertResp,request.header.requestId,
                 json::object({{"nodeId",std::to_string(nodeId)},
                               {"name",json::quote(outputName)}}),FlagResponse);
+        }
+        case MessageType::PreviewReq: {
+            const auto user=requireUser(body);
+            const auto source=repository_.getStoredFile(user,json::requireInt(body,"nodeId"));
+            const auto maxBytes=static_cast<std::size_t>(std::clamp<std::int64_t>(
+                json::requireInt(body,"maxBytes"),1,512*1024));
+            const auto extension=lowerExtension(source.name);
+            bool markdown=false;
+            bool truncated=false;
+            std::string content;
+            if(isTextPreviewable(source.name)) {
+                content=readPreviewText(source.blobPath,maxBytes,truncated);
+                markdown=extension==".md" || extension==".markdown";
+            } else if(extension==".docx" || extension==".pdf") {
+                const auto converted=markdownConverter_.convert(source.blobPath,source.name);
+                content=readPreviewText(converted.path(),maxBytes,truncated);
+                markdown=true;
+            } else {
+                throw ServiceError(ErrorCode::BadRequest,
+                    "preview supports text, Markdown, DOCX, and text-based PDF files");
+            }
+            return makeJsonPacket(MessageType::PreviewResp,request.header.requestId,
+                json::object({{"name",json::quote(source.name)},
+                              {"content",json::quote(content)},
+                              {"markdown",boolean(markdown)},
+                              {"truncated",boolean(truncated)}}),FlagResponse);
         }
         default: throw ServiceError(ErrorCode::BadRequest,"unsupported message type");
         }

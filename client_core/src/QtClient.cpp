@@ -1,7 +1,6 @@
 #include "cloud/client/QtClient.h"
 #include <QMetaObject>
 #include <QDir>
-#include <QStringList>
 
 #include <filesystem>
 #include <functional>
@@ -170,6 +169,30 @@ void ClientWorker::doClaimShareCode(const QString &code) {
     }
 }
 
+void ClientWorker::doPreview(qint64 nodeId) {
+    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    try {
+        const auto result=core_->preview(static_cast<std::int64_t>(nodeId));
+        emit previewReady(QString::fromStdString(result.name),
+                          QString::fromUtf8(result.content),result.markdown,result.truncated);
+    } catch (const ClientError &e) {
+        emit error(QString::fromStdString(e.code()), QString::fromLocal8Bit(e.what()));
+    } catch (const std::exception &e) {
+        emit error("EXCEPTION", QString::fromLocal8Bit(e.what()));
+    }
+}
+
+void ClientWorker::doConvertToMarkdown(qint64 nodeId) {
+    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    try {
+        emit markdownSaved(static_cast<qint64>(core_->convertToMarkdown(nodeId)));
+    } catch (const ClientError &e) {
+        emit error(QString::fromStdString(e.code()), QString::fromLocal8Bit(e.what()));
+    } catch (const std::exception &e) {
+        emit error("EXCEPTION", QString::fromLocal8Bit(e.what()));
+    }
+}
+
 void ClientWorker::doUploadDirectory(const QString &localPath, qint64 parentId) {
     if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
     try {
@@ -310,6 +333,8 @@ QtClient::QtClient(const QString &host, quint16 port, QObject *parent)
     connect(this, &QtClient::invokeDelete, worker_, &ClientWorker::doDelete, Qt::QueuedConnection);
     connect(this, &QtClient::invokeCreateShareCode, worker_, &ClientWorker::doCreateShareCode, Qt::QueuedConnection);
     connect(this, &QtClient::invokeClaimShareCode, worker_, &ClientWorker::doClaimShareCode, Qt::QueuedConnection);
+    connect(this, &QtClient::invokePreview, worker_, &ClientWorker::doPreview, Qt::QueuedConnection);
+    connect(this, &QtClient::invokeConvertToMarkdown, worker_, &ClientWorker::doConvertToMarkdown, Qt::QueuedConnection);
     connect(this, &QtClient::invokeUpload, worker_, &ClientWorker::doUpload, Qt::QueuedConnection);
     connect(this, &QtClient::invokeUploadDirectory, worker_, &ClientWorker::doUploadDirectory,
             Qt::QueuedConnection);
@@ -328,6 +353,8 @@ QtClient::QtClient(const QString &host, quint16 port, QObject *parent)
     connect(worker_, &ClientWorker::deleteFinished, this, &QtClient::deleteFinished, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::shareCodeCreated, this, &QtClient::shareCodeCreated, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::shareCodeClaimed, this, &QtClient::shareCodeClaimed, Qt::QueuedConnection);
+    connect(worker_, &ClientWorker::previewReady, this, &QtClient::previewReady, Qt::QueuedConnection);
+    connect(worker_, &ClientWorker::markdownSaved, this, &QtClient::markdownSaved, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::uploadProgress, this, &QtClient::uploadProgress, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::uploadFinished, this, &QtClient::uploadFinished, Qt::QueuedConnection);
     connect(worker_, &ClientWorker::downloadProgress, this, &QtClient::downloadProgress, Qt::QueuedConnection);
@@ -377,6 +404,14 @@ void QtClient::createShareCode(qint64 nodeId) {
 
 void QtClient::claimShareCode(const QString &code) {
     emit invokeClaimShareCode(code);
+}
+
+void QtClient::preview(qint64 nodeId) {
+    emit invokePreview(nodeId);
+}
+
+void QtClient::convertToMarkdown(qint64 nodeId) {
+    emit invokeConvertToMarkdown(nodeId);
 }
 
 void QtClient::upload(const QString &localPath, qint64 parentId, const QString &remoteName) {

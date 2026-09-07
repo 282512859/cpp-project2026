@@ -34,6 +34,13 @@ struct RemoteNode {
     std::int64_t modifiedAt{};  ///< 最后修改时间，单位和纪元由服务端协议定义（当前为 Unix 毫秒）。
 };
 
+struct DocumentPreview {
+    std::string name;
+    std::string content;
+    bool markdown{};
+    bool truncated{};
+};
+
 /**
  * @brief 服务端明确返回错误响应时抛出的异常。
  *
@@ -176,6 +183,7 @@ public:
     // source stem plus ".md".
     std::int64_t convertToMarkdown(std::int64_t nodeId,
                                    const std::string& outputName = {});
+    DocumentPreview preview(std::int64_t nodeId, std::int64_t maxBytes = 512 * 1024);
 
     /**
      * @brief 把一个本地普通文件分块上传到远程目录。

@@ -279,6 +279,17 @@ std::int64_t ClientCore::convertToMarkdown(std::int64_t nodeId,
     return json::requireInt(response, "nodeId");
 }
 
+DocumentPreview ClientCore::preview(std::int64_t nodeId, std::int64_t maxBytes) {
+    const auto response = jsonResponse(
+        MessageType::PreviewReq,
+        authJson({{"nodeId", std::to_string(nodeId)},
+                  {"maxBytes", std::to_string(maxBytes)}}));
+    return {json::requireString(response, "name"),
+            json::requireString(response, "content"),
+            json::requireBool(response, "markdown"),
+            json::requireBool(response, "truncated")};
+}
+
 /**
  * @brief 完成本地文件检查、秒传协商、分块发送和上传确认。
  * @param localPath 本地源文件路径，必须指向普通文件。

@@ -52,6 +52,9 @@ enum class MessageType : std::uint16_t {
 
     ConvertReq = 600,
     ConvertResp = 601,
+
+    PreviewReq = 610,
+    PreviewResp = 611,
 };
 
 // 标志位使用二进制的不同 bit 表示多个可以同时成立的属性。

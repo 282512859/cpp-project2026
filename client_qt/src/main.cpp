@@ -264,7 +264,7 @@ int main(int argc, char **argv) {
     fileHeading->addLayout(headingColumn);
     fileHeading->addStretch();
     auto *toolbar = new QToolBar();
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
     auto *upAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_ArrowUp), "Up");
     auto *refreshAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_BrowserReload), "Refresh");
     auto *newFolderAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DirIcon), "New folder");
@@ -304,10 +304,25 @@ int main(int argc, char **argv) {
     log->setReadOnly(true);
     log->setPlaceholderText("Recent activity appears here");
     activityLayout->addWidget(log);
+    auto *previewSurface = makeSurface("sideSurface");
+    previewSurface->setMinimumWidth(300);
+    previewSurface->setMaximumWidth(360);
+    auto *previewLayout = new QVBoxLayout(previewSurface);
+    previewLayout->setContentsMargins(16, 15, 16, 16);
+    previewLayout->setSpacing(6);
+    previewLayout->addWidget(makeLabel("Preview", "sectionTitle"));
+    auto *previewTitle = makeLabel("Select a file", "muted");
+    auto *previewText = new QTextEdit();
+    previewText->setReadOnly(true);
+    previewText->setPlaceholderText("Select a text or Markdown file to preview its content.");
+    previewText->setMinimumHeight(190);
+    previewLayout->addWidget(previewTitle);
+    previewLayout->addWidget(previewText, 1);
+    sideColumn->addWidget(previewSurface, 2);
     sideColumn->addWidget(transferSurface);
     sideColumn->addWidget(activitySurface, 1);
-    bodyLayout->addWidget(fileSurface, 1);
-    bodyLayout->addLayout(sideColumn);
+    bodyLayout->addWidget(fileSurface, 3);
+    bodyLayout->addLayout(sideColumn, 1);
     workspacePageLayout->addWidget(workspaceBody, 1);
 
     pages->addWidget(loginPage);
@@ -398,6 +413,20 @@ int main(int argc, char **argv) {
             QMessageBox::information(&window, "File received",
                                      "The shared file was added to My files.");
             doList(0);
+        });
+        QObject::connect(boundClient, &QtClient::previewReady,
+                         [&](const QString &title, const QString &content, bool markdown, bool truncated) {
+            previewTitle->setText(title);
+            const auto visibleContent=content + (truncated
+                ? QStringLiteral("\n\n[Preview limited to the first 512 KiB]")
+                : QString());
+            if (markdown) previewText->setMarkdown(visibleContent);
+            else previewText->setPlainText(visibleContent);
+            if (markdown) log->append(QStringLiteral("Markdown preview loaded: %1").arg(title));
+        });
+        QObject::connect(boundClient, &QtClient::markdownSaved, [&](qint64 nodeId) {
+            log->append(QStringLiteral("Markdown file saved, node %1").arg(nodeId));
+            doList(currentParent);
         });
         QObject::connect(boundClient, &QtClient::uploadProgress, [&](qint64 done, qint64 total) {
             const int percent = progressPercent(done, total);
@@ -549,6 +578,19 @@ int main(int argc, char **argv) {
     });
     QObject::connect(browser, &FileBrowser::createShareCode, [&](qint64 id) {
         if (client) client->createShareCode(id);
+    });
+    QObject::connect(browser, &FileBrowser::nodeSelected,
+                     [&](qint64 id, const QString &name, bool directory, qint64 size) {
+        previewTitle->setText(name);
+        if (directory) {
+            previewText->setPlainText("Folder selected. Double-click to open it.");
+        } else if (client) {
+            previewText->setPlainText(QStringLiteral("Loading preview (%1 bytes)...").arg(size));
+            client->preview(id);
+        }
+    });
+    QObject::connect(browser, &FileBrowser::convertToMarkdown, [&](qint64 id) {
+        if (client) client->convertToMarkdown(id);
     });
     QObject::connect(browser, &FileBrowser::refreshRequested, [&]() { doList(currentParent); });
 

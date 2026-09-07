@@ -26,6 +26,7 @@ void help() {
       "  put \"local path\" <parentId> [\"remote name\"]\n"
       "  get <nodeId> \"local path\"\n"
       "  convert <nodeId> [\"output name.md\"]\n"
+      "  preview <nodeId>\n"
       "  logout | help | quit\n";
 }
 
@@ -83,6 +84,7 @@ int main(int argc,char** argv) {
                 else if(command=="put") { std::string path,name; std::int64_t p; in>>std::quoted(path,'"','\0')>>p; if(in>>std::quoted(name)){} std::cout<<"uploaded as node "<<client.upload(utf8Path(path),p,name,progress)<<'\n'; }
                 else if(command=="get") { std::int64_t id; std::string path; in>>id>>std::quoted(path,'"','\0'); client.download(id,utf8Path(path),progress); std::cout<<"downloaded\n"; }
                 else if(command=="convert") { std::int64_t id; std::string name; in>>id; if(in>>std::quoted(name)){} std::cout<<"converted as node "<<client.convertToMarkdown(id,name)<<'\n'; }
+                else if(command=="preview") { std::int64_t id; in>>id; const auto result=client.preview(id); std::cout<<result.content<<(result.truncated?"\n[preview truncated]\n":"\n"); }
                 else std::cout<<"unknown command; type help\n";
             } catch(const cloud::client::ClientError& e) { std::cout<<"server error ["<<e.code()<<"] "<<e.what()<<'\n'; }
               catch(const std::exception& e) { std::cout<<"error: "<<e.what()<<'\n'; }

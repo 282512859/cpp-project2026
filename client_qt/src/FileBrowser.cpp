@@ -3,6 +3,7 @@
 #include <QStandardItem>
 #include <QContextMenuEvent>
 #include <QDateTime>
+#include <QFileInfo>
 #include <QLocale>
 #include <QStyle>
 #include <QVBoxLayout>
@@ -19,6 +20,11 @@ QString friendlySize(qint64 bytes) {
         ++unit;
     } while (value >= 1024.0 && unit < units.size() - 1);
     return QStringLiteral("%1 %2").arg(value, 0, 'f', value < 10.0 ? 1 : 0).arg(units.at(unit));
+}
+
+bool convertibleDocument(const QString &name) {
+    const auto extension=QFileInfo(name).suffix().toLower();
+    return extension=="docx" || extension=="pdf";
 }
 
 } // namespace
@@ -48,6 +54,8 @@ FileBrowser::FileBrowser(QWidget *parent)
 
     connect(view_, &QTreeView::activated, this, &FileBrowser::onActivated);
     connect(view_, &QWidget::customContextMenuRequested, this, &FileBrowser::onContextMenuRequested);
+    connect(view_->selectionModel(), &QItemSelectionModel::currentChanged,
+            this, &FileBrowser::onCurrentChanged);
 }
 
 void FileBrowser::setEntries(const QVariantList &entries) {
@@ -57,6 +65,7 @@ void FileBrowser::setEntries(const QVariantList &entries) {
         const bool directory = m.value("directory").toBool();
         QList<QStandardItem*> row;
         auto nameItem = new QStandardItem(m.value("name").toString());
+        nameItem->setData(m.value("size"), Qt::UserRole + 1);
         nameItem->setIcon(view_->style()->standardIcon(
             directory ? QStyle::SP_DirIcon : QStyle::SP_FileIcon));
         nameItem->setEditable(false);
@@ -104,9 +113,22 @@ void FileBrowser::onContextMenuRequested(const QPoint &pos) {
                    [this, id, name, directory](){ emit downloadNode(id, name, directory); });
     if (!directory) {
         menu.addAction("Create extraction code", [this, id](){ emit createShareCode(id); });
+        if (convertibleDocument(name)) {
+            menu.addAction("Save as Markdown", [this, id](){ emit convertToMarkdown(id); });
+        }
     }
     menu.addAction("Rename", [this, id](){ emit renameNode(id); });
     menu.addAction("Delete", [this, id](){ emit deleteNode(id); });
     menu.addAction("Refresh", [this](){ emit refreshRequested(); });
     menu.exec(view_->viewport()->mapToGlobal(pos));
+}
+
+void FileBrowser::onCurrentChanged(const QModelIndex &current, const QModelIndex &) {
+    if (!current.isValid()) return;
+    const auto row = current.row();
+    const auto id = model_->data(model_->index(row, 3)).toLongLong();
+    const auto name = model_->data(model_->index(row, 0)).toString();
+    const bool directory = model_->data(model_->index(row, 4)).toString() == "DIR";
+    const auto size = model_->data(model_->index(row, 0), Qt::UserRole + 1).toLongLong();
+    emit nodeSelected(id, name, directory, size);
 }
