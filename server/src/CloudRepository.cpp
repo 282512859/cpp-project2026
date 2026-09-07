@@ -8,6 +8,7 @@
 #include <cctype>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 
@@ -436,7 +437,10 @@ std::int64_t CloudRepository::importLocalFile(
         std::ifstream input(localPath,std::ios::binary);
         if(!input) throw ServiceError(ErrorCode::IoError,"cannot open converted file");
         std::vector<std::uint8_t> block(256U*1024U);
-        std::int64_t offset=0;
+        std::int64_t offset=init.received;
+        input.seekg(offset);
+        if(!input) throw ServiceError(ErrorCode::IoError,
+                                      "cannot resume converted file import");
         while(input) {
             input.read(reinterpret_cast<char*>(block.data()),
                        static_cast<std::streamsize>(block.size()));
@@ -455,6 +459,8 @@ std::int64_t CloudRepository::importLocalFile(
             std::filesystem::remove(it->second.tempPath,ignored);
             uploads_.erase(it);
         }
+        Statement drop(db_,"DELETE FROM upload_session WHERE transfer_id=?");
+        drop.text(1,init.transferId); drop.step();
         throw;
     }
 }

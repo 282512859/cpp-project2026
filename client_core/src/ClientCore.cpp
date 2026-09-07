@@ -270,6 +270,15 @@ std::int64_t ClientCore::claimShareCode(const std::string& code) {
     return json::requireInt(response, "nodeId");
 }
 
+std::int64_t ClientCore::convertToMarkdown(std::int64_t nodeId,
+                                           const std::string& outputName) {
+    const auto response = jsonResponse(
+        MessageType::ConvertReq,
+        authJson({{"nodeId", std::to_string(nodeId)},
+                  {"outputName", json::quote(outputName)}}));
+    return json::requireInt(response, "nodeId");
+}
+
 /**
  * @brief 完成本地文件检查、秒传协商、分块发送和上传确认。
  * @param localPath 本地源文件路径，必须指向普通文件。
@@ -291,15 +300,6 @@ std::int64_t ClientCore::claimShareCode(const std::string& code) {
  * token 和 transferId 的固定长度由服务端会话/传输 ID 生成规则保证。若将来改变其编码，
  * 客户端与服务端必须同步修改此布局。
  */
-std::int64_t ClientCore::convertToMarkdown(std::int64_t nodeId,
-                                           const std::string& outputName) {
-    const auto response = jsonResponse(
-        MessageType::ConvertReq,
-        authJson({{"nodeId", std::to_string(nodeId)},
-                  {"outputName", json::quote(outputName)}}));
-    return json::requireInt(response, "nodeId");
-}
-
 std::int64_t ClientCore::upload(const std::filesystem::path& localPath,
                                 std::int64_t parentId,
                                 const std::string& remoteName,

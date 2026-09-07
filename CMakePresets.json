@@ -30,7 +30,8 @@
       "displayName": "Visual Studio 2022 x64 Debug (Qt)",
       "binaryDir": "${sourceDir}/out/build/windows-debug-qt",
       "cacheVariables": {
-        "BUILD_QT_CLIENT": "ON"
+        "BUILD_QT_CLIENT": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
       }
     },
     {
@@ -39,7 +40,8 @@
       "displayName": "Visual Studio 2022 x64 Release (Qt)",
       "binaryDir": "${sourceDir}/out/build/windows-release-qt",
       "cacheVariables": {
-        "BUILD_QT_CLIENT": "ON"
+        "BUILD_QT_CLIENT": "ON",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-static-md"
       }
     }
   ],

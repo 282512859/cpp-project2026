@@ -7,10 +7,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(LANCLOUD_BUILD_TESTS "Build first-version tests" ON)
+option(BUILD_QT_CLIENT "Build Qt client wrapper and GUI (requires Qt6)" OFF)
 
 if(MSVC)
     add_compile_options(/W4 /permissive- /utf-8)
-    # MSVC 默认动态运行时（/MD、/MDd），与 Qt 官方预编译包一致，避免两套堆冲突。
+    if(BUILD_QT_CLIENT)
+        # Qt 官方 MSVC 二进制使用动态 CRT。
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    else()
+        # 命令行免安装包静态链接 CRT，不依赖 VC Runtime DLL。
+        set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif()
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
