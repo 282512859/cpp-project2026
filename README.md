@@ -15,7 +15,8 @@ LanCloudDrive 是一个使用 C++20、Qt 6、TCP 和 SQLite 实现的局域网�
 已安装 Visual Studio 2022、CMake、vcpkg 和 Qt 6 MSVC x64 后，在仓库根目录执行：
 
 ```powershell
-$env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"   # 改为自己的 Qt 安装目录
+$env:QT_ROOT = "F:\Qt\6.8.3\msvc2022_64"   # 按本机实际安装目录修改
+$env:Qt6_DIR = "$env:QT_ROOT\lib\cmake\Qt6"
 cmake --preset windows-debug-qt -DCMAKE_PREFIX_PATH="$env:QT_ROOT"
 cmake --build --preset windows-debug-qt
 ```
@@ -98,6 +99,21 @@ flowchart LR
 
 ## Windows 开发环境
 
+### 本机已检测到的工具位置
+
+本项目当前开发机使用以下安装位置；换到其他电脑时，请将命令中的路径替换为实际路径：
+
+| 工具 | 当前路径或状态 |
+|---|---|
+| Qt 6 MSVC 2022 x64 | `F:\Qt\6.8.3\msvc2022_64` |
+| Qt CMake 配置 | `F:\Qt\6.8.3\msvc2022_64\lib\cmake\Qt6` |
+| CMake | `C:\Program Files\CMake\bin\cmake.exe`（4.4.3） |
+| Visual Studio 2022 | `D:\Visual Studio\Visual Studio2022\Community` |
+| vcpkg | 当前机器未设置 `VCPKG_ROOT`，如需依赖管理请先安装 |
+
+Qt 目录和构建产物不会随 Git 仓库提交。服务端 PDF 页面预览还需要 Poppler 的
+`pdftoppm.exe`，可通过 `LANCLOUD_PDFTOPPM` 指定完整路径。
+
 需要安装：
 
 1. Visual Studio 2022，并勾选“使用 C++ 的桌面开发”；
@@ -129,7 +145,7 @@ $env:VCPKG_ROOT = "C:\dev\vcpkg"
 设置 Qt 根目录。请把示例路径改成自己的实际安装位置：
 
 ```powershell
-$env:QT_ROOT = "C:\Qt\6.8.3\msvc2022_64"
+$env:QT_ROOT = "F:\Qt\6.8.3\msvc2022_64"
 $env:Qt6_DIR = "$env:QT_ROOT\lib\cmake\Qt6"
 ```
 
