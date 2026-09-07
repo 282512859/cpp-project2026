@@ -1,4 +1,4 @@
-// 负责人：成员2：服务端存储
+﻿// 负责人：成员2：服务端存储
 #include "cloud/server/CloudRepository.h"
 #include "cloud/server/ServiceError.h"
 #include "cloud/common/ErrorCode.h"
@@ -401,6 +401,61 @@ void CloudRepository::cleanupExpiredUploads() {
         std::error_code ignored;
         std::filesystem::remove(std::filesystem::path(paths[i]), ignored);
         Statement del(db_, "DELETE FROM upload_session WHERE transfer_id=?"); del.text(1,ids[i]); del.step();
+    }
+}
+
+StoredFileInfo CloudRepository::getStoredFile(std::int64_t userId,
+                                               std::int64_t nodeId) {
+    std::lock_guard lock(mutex_);
+    Statement query(db_,
+        "SELECT n.parent_id,n.name,b.relative_path,n.size "
+        "FROM nodes n JOIN blobs b ON n.blob_id=b.id "
+        "WHERE n.id=? AND n.owner_id=? AND n.is_directory=0");
+    query.integer(1,nodeId); query.integer(2,userId);
+    if(query.step()!=SQLITE_ROW)
+        throw ServiceError(ErrorCode::NotFound,"file not found");
+    return {sqlite3_column_int64(query.get(),0), columnText(query.get(),1),
+            storageRoot_/columnText(query.get(),2),
+            sqlite3_column_int64(query.get(),3)};
+}
+
+std::int64_t CloudRepository::importLocalFile(
+    std::int64_t userId, std::int64_t parentId, const std::string& name,
+    const std::filesystem::path& localPath) {
+    std::error_code sizeError;
+    const auto rawSize=std::filesystem::file_size(localPath,sizeError);
+    if(sizeError || rawSize>static_cast<std::uintmax_t>(
+                         std::numeric_limits<std::int64_t>::max()))
+        throw ServiceError(ErrorCode::IoError,"cannot read converted file size");
+    const auto size=static_cast<std::int64_t>(rawSize);
+    const auto sha=cloud::common::sha256File(localPath);
+    const auto init=beginUpload(userId,parentId,name,size,sha);
+    if(init.instant) return init.nodeId;
+
+    try {
+        std::ifstream input(localPath,std::ios::binary);
+        if(!input) throw ServiceError(ErrorCode::IoError,"cannot open converted file");
+        std::vector<std::uint8_t> block(256U*1024U);
+        std::int64_t offset=0;
+        while(input) {
+            input.read(reinterpret_cast<char*>(block.data()),
+                       static_cast<std::streamsize>(block.size()));
+            const auto count=static_cast<std::size_t>(input.gcount());
+            if(count==0) break;
+            offset=appendUpload(userId,init.transferId,offset,block.data(),count);
+        }
+        if(offset!=size)
+            throw ServiceError(ErrorCode::IoError,"cannot read complete converted file");
+        return finishUpload(userId,init.transferId);
+    } catch(...) {
+        std::lock_guard lock(mutex_);
+        const auto it=uploads_.find(init.transferId);
+        if(it!=uploads_.end()) {
+            std::error_code ignored;
+            std::filesystem::remove(it->second.tempPath,ignored);
+            uploads_.erase(it);
+        }
+        throw;
     }
 }
 

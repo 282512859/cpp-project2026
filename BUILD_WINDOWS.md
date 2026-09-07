@@ -7,6 +7,7 @@
 
 - Visual Studio 2022，勾选“使用 C++ 的桌面开发”和 CMake 组件；
 - Git for Windows；
+- Python 3.10 或更高版本（仅构建后台转换组件时需要）；
 - 网络连接（首次获取 vcpkg 和静态 SQLite）。
 
 解压源码后双击：
@@ -32,6 +33,9 @@ build_release.bat
 dist/LanCloudDrive_v0.1_windows_x64_portable.zip
 out/build/windows-release/LanCloudDrive.sln
 ```
+
+构建脚本还会生成并打包 `tools/document_converter.exe`。它包含 MarkItDown 的
+DOCX/PDF 依赖，最终用户不需要安装 Python；首次构建需要连接 PyPI 下载这些依赖。
 
 免安装包包含：
 

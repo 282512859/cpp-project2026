@@ -1,4 +1,4 @@
-// 负责人：成员1：服务端架构/组长
+﻿// 负责人：成员1：服务端架构/组长
 #pragma once
 
 #include <cstdint>
@@ -49,6 +49,9 @@ enum class MessageType : std::uint16_t {
     ShareCreateResp = 501,
     ShareClaimReq = 502,
     ShareClaimResp = 503,
+
+    ConvertReq = 600,
+    ConvertResp = 601,
 };
 
 // 标志位使用二进制的不同 bit 表示多个可以同时成立的属性。

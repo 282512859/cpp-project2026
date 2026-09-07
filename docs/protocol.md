@@ -1,4 +1,4 @@
-<!-- 负责人：成员1：服务端架构/组长 -->
+﻿<!-- 负责人：成员1：服务端架构/组长 -->
 # 第一版网络协议
 
 所有整数均为无符号大端序（网络字节序）。禁止直接发送 C++ 结构体。
@@ -25,6 +25,8 @@
 | 200～207 | LIST、MKDIR、RENAME、DELETE 请求/响应 |
 | 300～305 | UPLOAD_INIT、UPLOAD_CHUNK/ACK、UPLOAD_FINISH |
 | 400～403 | DOWNLOAD_INIT、DOWNLOAD_CHUNK_REQ/CHUNK |
+| 500～503 | SHARE_CREATE / SHARE_CLAIM 请求/响应 |
+| 600～601 | CONVERT_REQ / CONVERT_RESP |
 
 失败统一响应 `ERROR_RESP`，设置 `RESPONSE|ERROR`，并返回：
 
@@ -56,6 +58,24 @@
 3. 客户端循环发送 `DOWNLOAD_CHUNK_REQ`：`token,transferId,offset,maxBytes`；
 4. 服务端返回 `DOWNLOAD_CHUNK`，设置 `RESPONSE|BINARY`，最后一块额外设置 `FINAL`；
 5. 客户端写 `.download` 并校验，成功后才改为目标名称。
+
+## Word/PDF 转 Markdown
+
+客户端发送 `CONVERT_REQ`：
+
+```json
+{"token":"...","nodeId":12,"outputName":"报告.md"}
+```
+
+`outputName` 为空时，服务端使用源文件主名称加 `.md`。服务端仅接受 `.docx` 和
+文字型 `.pdf`，在本地调用随发布包携带的 MarkItDown 转换组件，并将结果作为普通
+网盘文件写入源文件所在目录。成功响应 `CONVERT_RESP`：
+
+```json
+{"nodeId":13,"name":"报告.md"}
+```
+
+转换是同步操作；源文件最大 100 MiB，转换结果最大 64 MiB，后台转换最长运行 120 秒。
 
 ## 限制
 

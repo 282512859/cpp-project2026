@@ -1,4 +1,4 @@
-// 负责人：成员3：客户端网络
+﻿// 负责人：成员3：客户端网络
 //
 // ClientCore 的实现分为三层：
 //   1. request()/jsonResponse() 负责通用的协议收发与错误转换；
@@ -291,6 +291,15 @@ std::int64_t ClientCore::claimShareCode(const std::string& code) {
  * token 和 transferId 的固定长度由服务端会话/传输 ID 生成规则保证。若将来改变其编码，
  * 客户端与服务端必须同步修改此布局。
  */
+std::int64_t ClientCore::convertToMarkdown(std::int64_t nodeId,
+                                           const std::string& outputName) {
+    const auto response = jsonResponse(
+        MessageType::ConvertReq,
+        authJson({{"nodeId", std::to_string(nodeId)},
+                  {"outputName", json::quote(outputName)}}));
+    return json::requireInt(response, "nodeId");
+}
+
 std::int64_t ClientCore::upload(const std::filesystem::path& localPath,
                                 std::int64_t parentId,
                                 const std::string& remoteName,

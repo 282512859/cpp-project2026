@@ -1,13 +1,15 @@
-// 负责人：成员1：服务端架构/组长
+﻿// 负责人：成员1：服务端架构/组长
 #include "cloud/server/ServerApp.h"
 #include "cloud/server/ServiceError.h"
 #include "cloud/common/JsonLite.h"
+#include "cloud/common/ExecutablePath.h"
 #include "cloud/common/MessageType.h"
 #include "cloud/common/ProtocolConstants.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <cctype>
 #include <iostream>
 #include <stdexcept>
 #include <thread>
@@ -25,12 +27,33 @@ std::uint64_t read64(const std::uint8_t* bytes) {
 
 std::string boolean(bool value) { return value ? "true" : "false"; }
 
+std::filesystem::path converterHelperPath() {
+    const auto executable=cloud::common::executableDirectory();
+    const auto besideExecutable=executable/"tools"/"document_converter.exe";
+    if(std::filesystem::is_regular_file(besideExecutable)) return besideExecutable;
+    return executable.parent_path()/"tools"/"document_converter.exe";
+}
+
+bool endsWithMarkdownExtension(const std::string& name) {
+    if(name.size()<3) return false;
+    std::string extension=name.substr(name.size()-3);
+    std::transform(extension.begin(),extension.end(),extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension==".md";
+}
+
+std::string defaultMarkdownName(const std::string& sourceName) {
+    const auto dot=sourceName.find_last_of('.');
+    return sourceName.substr(0,dot==std::string::npos?sourceName.size():dot)+".md";
+}
+
 } // namespace
 
 ServerApp::ServerApp(std::string address, std::uint16_t port,
                      const std::filesystem::path& runtimeRoot)
     : address_(std::move(address)), port_(port),
-      repository_(runtimeRoot / "cloud.db", runtimeRoot / "storage") {}
+      repository_(runtimeRoot / "cloud.db", runtimeRoot / "storage"),
+      markdownConverter_(converterHelperPath(),runtimeRoot/"conversion") {}
 
 void ServerApp::run() {
     auto listener = listenTcp(address_, port_);
@@ -198,6 +221,20 @@ Packet ServerApp::handle(const Packet& request) {
             auto bytes=repository_.readDownload(user,json::requireString(body,"transferId"),json::requireInt(body,"offset"),maxBytes,final);
             return makePacket(MessageType::DownloadChunk,request.header.requestId,std::move(bytes),
                               FlagResponse|FlagBinary|(final?FlagFinal:FlagNone));
+        }
+        case MessageType::ConvertReq: {
+            const auto user=requireUser(body);
+            const auto source=repository_.getStoredFile(user,json::requireInt(body,"nodeId"));
+            auto outputName=json::requireString(body,"outputName");
+            if(outputName.empty()) outputName=defaultMarkdownName(source.name);
+            if(!endsWithMarkdownExtension(outputName))
+                throw ServiceError(ErrorCode::BadRequest,"output name must end with .md");
+            const auto converted=markdownConverter_.convert(source.blobPath,source.name);
+            const auto nodeId=repository_.importLocalFile(user,source.parentId,
+                                                          outputName,converted.path());
+            return makeJsonPacket(MessageType::ConvertResp,request.header.requestId,
+                json::object({{"nodeId",std::to_string(nodeId)},
+                              {"name",json::quote(outputName)}}),FlagResponse);
         }
         default: throw ServiceError(ErrorCode::BadRequest,"unsupported message type");
         }

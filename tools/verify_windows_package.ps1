@@ -7,6 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $server = Join-Path $PackageRoot 'bin\cloud_server.exe'
 $client = Join-Path $PackageRoot 'bin\cloud_client.exe'
+$converter = Join-Path $PackageRoot 'tools\document_converter.exe'
+$converterLicenses = Join-Path $PackageRoot 'tools\document_converter_licenses.txt'
 
 foreach ($file in @($server, $client)) {
     if (-not (Test-Path $file -PathType Leaf)) {
@@ -25,6 +27,17 @@ foreach ($file in @($server, $client)) {
             throw "Unexpected runtime dependency '$forbidden' in $file"
         }
     }
+}
+
+if (-not (Test-Path $converter -PathType Leaf)) {
+    throw "Missing document converter helper: $converter"
+}
+$converterBytes = [System.IO.File]::ReadAllBytes($converter)
+if ($converterBytes.Length -lt 2 -or $converterBytes[0] -ne 0x4d -or $converterBytes[1] -ne 0x5a) {
+    throw "Not a Windows PE executable: $converter"
+}
+if (-not (Test-Path $converterLicenses -PathType Leaf)) {
+    throw "Missing document converter license notices: $converterLicenses"
 }
 
 Write-Host 'Windows package verification passed.'
