@@ -25,6 +25,7 @@ void help() {
       "  rm <nodeId>\n"
       "  put \"local path\" <parentId> [\"remote name\"]\n"
       "  get <nodeId> \"local path\"\n"
+      "  convert <nodeId> [\"output name.md\"]\n"
       "  logout | help | quit\n";
 }
 
@@ -63,6 +64,8 @@ int main(int argc,char** argv) {
         std::string line;
         while(std::cout<<"> "&&std::getline(std::cin,line)) {
             try {
+                // PowerShell can prefix redirected UTF-8 input with a BOM.
+                if(line.starts_with("\xEF\xBB\xBF")) line.erase(0,3);
                 std::istringstream in(line); std::string command; in>>command;
                 if(command.empty()) continue;
                 if(command=="quit"||command=="exit") break;
@@ -77,8 +80,9 @@ int main(int argc,char** argv) {
                 } else if(command=="mkdir") { std::int64_t p; std::string name; in>>p>>std::quoted(name); std::cout<<"created node "<<client.mkdir(p,name)<<'\n'; }
                 else if(command=="rename") { std::int64_t id; std::string name; in>>id>>std::quoted(name); client.renameNode(id,name); std::cout<<"renamed\n"; }
                 else if(command=="rm") { std::int64_t id; in>>id; client.deleteNode(id); std::cout<<"deleted\n"; }
-                else if(command=="put") { std::string path,name; std::int64_t p; in>>std::quoted(path)>>p; if(in>>std::quoted(name)){} std::cout<<"uploaded as node "<<client.upload(utf8Path(path),p,name,progress)<<'\n'; }
-                else if(command=="get") { std::int64_t id; std::string path; in>>id>>std::quoted(path); client.download(id,utf8Path(path),progress); std::cout<<"downloaded\n"; }
+                else if(command=="put") { std::string path,name; std::int64_t p; in>>std::quoted(path,'"','\0')>>p; if(in>>std::quoted(name)){} std::cout<<"uploaded as node "<<client.upload(utf8Path(path),p,name,progress)<<'\n'; }
+                else if(command=="get") { std::int64_t id; std::string path; in>>id>>std::quoted(path,'"','\0'); client.download(id,utf8Path(path),progress); std::cout<<"downloaded\n"; }
+                else if(command=="convert") { std::int64_t id; std::string name; in>>id; if(in>>std::quoted(name)){} std::cout<<"converted as node "<<client.convertToMarkdown(id,name)<<'\n'; }
                 else std::cout<<"unknown command; type help\n";
             } catch(const cloud::client::ClientError& e) { std::cout<<"server error ["<<e.code()<<"] "<<e.what()<<'\n'; }
               catch(const std::exception& e) { std::cout<<"error: "<<e.what()<<'\n'; }

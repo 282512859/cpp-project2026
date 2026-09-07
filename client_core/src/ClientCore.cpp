@@ -256,6 +256,15 @@ void ClientCore::deleteNode(std::int64_t nodeId) {
                  authJson({{"nodeId", std::to_string(nodeId)}}));
 }
 
+std::int64_t ClientCore::convertToMarkdown(std::int64_t nodeId,
+                                           const std::string& outputName) {
+    const auto response = jsonResponse(
+        MessageType::ConvertReq,
+        authJson({{"nodeId", std::to_string(nodeId)},
+                  {"outputName", json::quote(outputName)}}));
+    return json::requireInt(response, "nodeId");
+}
+
 /**
  * @brief 完成本地文件检查、秒传协商、分块发送和上传确认。
  * @param localPath 本地源文件路径，必须指向普通文件。

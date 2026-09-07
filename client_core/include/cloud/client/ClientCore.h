@@ -169,6 +169,12 @@ public:
      */
     void deleteNode(std::int64_t nodeId);
 
+    // Converts a remote .docx or .pdf on the server and stores the generated
+    // Markdown file beside the source node. An empty outputName uses the
+    // source stem plus ".md".
+    std::int64_t convertToMarkdown(std::int64_t nodeId,
+                                   const std::string& outputName = {});
+
     /**
      * @brief 把一个本地普通文件分块上传到远程目录。
      * @param localPath 本地源文件路径；必须存在且为普通文件。

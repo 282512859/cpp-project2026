@@ -1,6 +1,7 @@
 # 负责人：成员1：服务端架构/组长
 add_executable(cloud_server
     src/CloudRepository.cpp
+    src/MarkdownConverter.cpp
     src/ServerApp.cpp
     src/SessionManager.cpp
     src/main.cpp
@@ -21,3 +22,19 @@ else()
 endif()
 
 install(TARGETS cloud_server RUNTIME DESTINATION bin)
+
+set(LANCLOUD_DOCUMENT_CONVERTER_EXE
+    "${PROJECT_SOURCE_DIR}/out/tools/document_converter.exe"
+    CACHE FILEPATH "Path to the packaged document converter helper")
+if(EXISTS "${LANCLOUD_DOCUMENT_CONVERTER_EXE}")
+    add_custom_command(TARGET cloud_server POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:cloud_server>/tools"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${LANCLOUD_DOCUMENT_CONVERTER_EXE}"
+                "$<TARGET_FILE_DIR:cloud_server>/tools/document_converter.exe")
+    install(PROGRAMS "${LANCLOUD_DOCUMENT_CONVERTER_EXE}" DESTINATION tools)
+    install(FILES "${PROJECT_SOURCE_DIR}/out/tools/document_converter_licenses.txt"
+            DESTINATION tools)
+else()
+    message(WARNING "document_converter.exe is absent; the convert command will be unavailable")
+endif()

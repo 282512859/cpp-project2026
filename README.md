@@ -1,7 +1,7 @@
 <!-- 负责人：成员4：客户端界面 -->
 # LanCloudDrive 第一版（v0.1）
 
-这是《C++ 局域网网盘》三次迭代中的第一版：提供两个独立的 Windows x64 控制台程序 `cloud_server.exe` 和 `cloud_client.exe`，验证 C/S 架构、公共协议、持久化与文件传输主链路。工程面向 Visual Studio 2022，可生成静态链接的免安装运行包。第二版再加入后台任务和更完善的交互，第三版加入文件转换/视频快照等创新功能。
+这是一个 C++ 局域网网盘项目：提供两个独立的 Windows x64 控制台程序 `cloud_server.exe` 和 `cloud_client.exe`，实现 C/S 架构、公共协议、持久化、文件传输以及轻量文档转换。工程面向 Visual Studio 2022，可生成免安装运行包。
 
 ## 已实现功能
 
@@ -11,6 +11,7 @@
 - SQLite 持久化，用户数据互相隔离；
 - 根目录/子目录浏览、新建目录、重命名、递归删除；
 - 文件按 256 KiB 顺序分块上传、下载和进度输出；
+- 服务端离线把 `.docx` 和文字型 `.pdf` 转换为同目录下的 Markdown 文件；
 - 上传先写 `.part`，完成后重新计算 SHA-256，再提交文件节点；
 - 按 `SHA-256 + size` 内容去重，相同文件再次上传可秒传；
 - 下载先写 `.download`，大小及 SHA-256 校验成功后才改为目标文件；
@@ -19,7 +20,7 @@
 
 ## 第一版的边界
 
-本版客户端是命令行程序 `cloud_client`。尚未实现 Qt 图形界面、GUI/网络异步桥接、每任务独立连接、取消与重试、断点续传、心跳超时、配额、PBKDF2、TLS、文档转 Markdown 和视频快照。它们分别属于第二、第三版。
+本版客户端是命令行程序 `cloud_client`。尚未实现 Qt 图形界面、GUI/网络异步桥接、每任务独立连接、取消与重试、断点续传、心跳超时、配额、PBKDF2、TLS、扫描 PDF 的 OCR 和视频快照。
 
 本版仍遵守最终工程的核心边界：公共协议只有 `cloud_common` 一份；服务端 socket、业务和 SQLite 分层；客户端通过 `ClientCore` 访问网络，后续 Qt 界面无需接触裸 socket。
 
@@ -112,6 +113,7 @@ mkdir 0 "课程资料"
 put "C:\Users\Alice\Desktop\报告.pdf" 1 "报告.pdf"
 ls 1
 get 2 "C:\Users\Alice\Desktop\下载的报告.pdf"
+convert 2 "报告.md"
 rename 2 "最终报告.pdf"
 rm 2
 logout
@@ -134,10 +136,15 @@ quit
 | `rm <节点ID>` | 删除文件或递归删除目录 |
 | `put "本地路径" <父目录ID> ["远端名称"]` | 上传文件 |
 | `get <节点ID> "本地路径"` | 下载文件；拒绝覆盖已有目标 |
+| `convert <节点ID> ["输出名称.md"]` | 在服务端把 `.docx`/`.pdf` 转换为同目录 Markdown |
 | `logout` | 注销当前令牌 |
 | `help` / `quit` | 显示帮助 / 退出 |
 
 ## 运行时数据
+
+转换功能由发布包 `tools/document_converter.exe` 在服务端后台执行。用户无需安装
+Python，也不要直接运行该辅助程序。转换使用 Microsoft MarkItDown 0.1.7，相关
+第三方许可证位于 `tools/document_converter_licenses.txt`。
 
 ```text
 runtime/

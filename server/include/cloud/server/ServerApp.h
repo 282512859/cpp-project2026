@@ -6,6 +6,7 @@
 #include "cloud/common/Packet.h"
 #include "cloud/common/Socket.h"
 #include "cloud/server/CloudRepository.h"
+#include "cloud/server/MarkdownConverter.h"
 #include "cloud/server/SessionManager.h"
 
 #include <cstdint>
@@ -32,6 +33,7 @@ private:
     std::uint16_t port_{};
     cloud::common::SocketRuntime socketRuntime_;
     CloudRepository repository_;
+    MarkdownConverter markdownConverter_;
     SessionManager sessions_;
 };
 

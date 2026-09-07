@@ -37,6 +37,9 @@ enum class MessageType : std::uint16_t {
     DownloadInitResp = 401,
     DownloadChunkReq = 402,
     DownloadChunk = 403,
+
+    ConvertReq = 500,
+    ConvertResp = 501,
 };
 
 enum MessageFlags : std::uint32_t {

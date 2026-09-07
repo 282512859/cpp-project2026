@@ -35,6 +35,13 @@ struct DownloadInfo {
     std::int64_t size{};
 };
 
+struct StoredFileInfo {
+    std::int64_t parentId{};
+    std::string name;
+    std::filesystem::path blobPath;
+    std::int64_t size{};
+};
+
 class CloudRepository {
 public:
     CloudRepository(std::filesystem::path databasePath,
@@ -52,6 +59,11 @@ public:
     void renameNode(std::int64_t userId, std::int64_t nodeId,
                     const std::string& name);
     void deleteNode(std::int64_t userId, std::int64_t nodeId);
+
+    StoredFileInfo getStoredFile(std::int64_t userId, std::int64_t nodeId);
+    std::int64_t importLocalFile(std::int64_t userId, std::int64_t parentId,
+                                 const std::string& name,
+                                 const std::filesystem::path& localPath);
 
     UploadInitResult beginUpload(std::int64_t userId, std::int64_t parentId,
                                  const std::string& name, std::int64_t size,
