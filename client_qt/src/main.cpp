@@ -1,5 +1,6 @@
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -8,6 +9,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QRegularExpression>
 #include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
@@ -35,6 +37,11 @@ int progressPercent(qint64 done, qint64 total) {
                           static_cast<long double>(done) * 100.0L /
                           static_cast<long double>(total))),
                       0, 100);
+}
+
+QString normalizedExtractionCode(QString code) {
+    code.remove(QRegularExpression(QStringLiteral("[\\s-]")));
+    return code.toUpper();
 }
 
 QFrame *makeSurface(const char *name = "surface") {
@@ -372,11 +379,15 @@ int main(int argc, char **argv) {
         });
         QObject::connect(boundClient, &QtClient::shareCodeCreated, [&](const QString &code) {
             const auto displayCode = code.toUpper();
+            const auto groupedCode = QStringLiteral("%1-%2")
+                                         .arg(displayCode.left(4), displayCode.mid(4));
+            QApplication::clipboard()->setText(displayCode);
             log->append(QStringLiteral("Extraction code created: %1").arg(displayCode));
             QMessageBox::information(&window, "Extraction code",
                                      QStringLiteral("Send this code to the recipient:\n\n%1\n\n"
-                                                    "It is valid for 24 hours and can be claimed once.")
-                                         .arg(displayCode));
+                                                    "It has been copied to the clipboard. It is valid for 24 hours "
+                                                    "and can be claimed once.")
+                                         .arg(groupedCode));
         });
         QObject::connect(boundClient, &QtClient::shareCodeClaimed, [&](qint64 nodeId) {
             currentParent = 0;
@@ -481,10 +492,19 @@ int main(int argc, char **argv) {
     QObject::connect(claimCodeAction, &QAction::triggered, [&]() {
         if (!client) return;
         bool ok = false;
-        const QString code = QInputDialog::getText(&window, "Extract shared file",
-                                                    "8-character extraction code:",
-                                                    QLineEdit::Normal, {}, &ok).trimmed();
-        if (ok && !code.isEmpty()) client->claimShareCode(code);
+        const QString enteredCode = QInputDialog::getText(&window, "Extract shared file",
+                                                           "8-character code (for example: A1B2-C3D4):",
+                                                           QLineEdit::Normal, {}, &ok);
+        if (!ok) return;
+        const QString code = normalizedExtractionCode(enteredCode);
+        static const QRegularExpression validCode(QStringLiteral("^[0-9A-F]{8}$"));
+        if (!validCode.match(code).hasMatch()) {
+            QMessageBox::warning(&window, "Invalid extraction code",
+                                 "Enter the 8-character code created by the sender. "
+                                 "Only 0-9 and A-F are allowed; spaces and hyphens are optional.");
+            return;
+        }
+        client->claimShareCode(code);
     });
     QObject::connect(browser, &FileBrowser::enterDirectory,
                      [&](qint64 id, const QString &name) {
