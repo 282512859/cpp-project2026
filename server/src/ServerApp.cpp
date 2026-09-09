@@ -26,11 +26,13 @@ namespace {
 using namespace cloud::common;
 
 std::uint64_t read64(const std::uint8_t* bytes) {
+    // UploadChunk 的 offset 按协议使用 8 字节大端序。
     std::uint64_t value=0;
     for(int i=0;i<8;++i) value=(value<<8U)|bytes[i];
     return value;
 }
 
+// JsonLite::object() 接收已经编码好的 JSON 值，布尔值不能再加引号。
 std::string boolean(bool value) { return value ? "true" : "false"; }
 
 std::filesystem::path converterHelperPath() {
@@ -54,7 +56,12 @@ std::string defaultMarkdownName(const std::string& sourceName) {
 }
 
 std::string lowerExtension(const std::string& name) {
-    auto extension=std::filesystem::path(name).extension().string();
+    // name 是协议中的 UTF-8 文件名，不能交给 Windows 的 path(string) 做
+    // 本地代码页转换；扩展名只需按字节查找，不影响中文字符内容。
+    const auto slash=name.find_last_of("/\\");
+    const auto dot=name.find_last_of('.');
+    if(dot==std::string::npos || (slash!=std::string::npos && dot<=slash)) return {};
+    auto extension=name.substr(dot);
     std::transform(extension.begin(),extension.end(),extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return extension;
@@ -170,10 +177,12 @@ std::vector<std::uint8_t> renderPdfPreview(const std::filesystem::path& source,
 ServerApp::ServerApp(std::string address, std::uint16_t port,
                      const std::filesystem::path& runtimeRoot)
     : address_(std::move(address)), port_(port),
+      // cloud.db 保存元数据，storage 保存真实文件内容。
       repository_(runtimeRoot / "cloud.db", runtimeRoot / "storage"),
       markdownConverter_(converterHelperPath(),runtimeRoot/"conversion") {}
 
 void ServerApp::run() {
+    // listener 只负责接收新连接；具体报文交给客户端线程处理。
     auto listener = listenTcp(address_, port_);
     std::cout << "LanCloudDrive server listening on " << address_ << ':' << port_ << '\n';
     std::thread(&ServerApp::cleanupLoop, this).detach();
@@ -207,6 +216,7 @@ void ServerApp::cleanupLoop() {
 
 void ServerApp::serveClient(Socket client, std::string peer) {
     try {
+        // 一条 TCP 连接可以承载多个连续的请求，不是处理一次就关闭。
         for (;;) {
             const auto request = receivePacket(client);
             sendPacket(client, handle(request));

@@ -22,7 +22,13 @@ constexpr std::uintmax_t kMaximumSourceSize=100U*1024U*1024U;
 constexpr std::uintmax_t kMaximumMarkdownSize=64U*1024U*1024U;
 
 std::string lowerExtension(const std::string& name) {
-    auto extension=std::filesystem::path(name).extension().string();
+    // 文件名来自 UTF-8 JSON。Windows 的 filesystem::path(string) 会尝试按
+    // 当前多字节代码页解释中文，可能抛出“无法映射 Unicode 字符”；这里
+    // 只需识别扩展名，直接在 UTF-8 字节串上处理即可。
+    const auto slash=name.find_last_of("/\\");
+    const auto dot=name.find_last_of('.');
+    if(dot==std::string::npos || (slash!=std::string::npos && dot<=slash)) return {};
+    auto extension=name.substr(dot);
     std::transform(extension.begin(),extension.end(),extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return extension;

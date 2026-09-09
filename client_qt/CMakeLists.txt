@@ -7,7 +7,8 @@ endif()
 find_package(Qt6 COMPONENTS Core Widgets REQUIRED)
 set(CMAKE_AUTOMOC ON)
 
-add_executable(client_qt_example
+# WIN32 表示这是纯图形程序，不创建控制台窗口；关闭启动它的终端也不会结束客户端。
+add_executable(client_qt_example WIN32
   src/main.cpp
   src/Theme.cpp
   src/LoginPage.cpp

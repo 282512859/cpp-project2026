@@ -90,6 +90,7 @@ private:
     qint64 previewNodeId_ = 0;
     qint64 previewPdfPage_ = 1;
     bool previewingPdf_ = false;
+    bool previewPending_ = false;
 };
 
 } // namespace client_qt

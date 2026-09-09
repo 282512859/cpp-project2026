@@ -357,6 +357,7 @@ void WorkspacePage::bindFileBrowser() {
             [this](qint64 id, const QString& name, bool directory, qint64 size) {
         previewTitle_->setText(name);
         if (directory) {
+            previewPending_ = false;
             previewingPdf_ = false;
             pdfControls_->hide();
             previewEmpty_->setText("Folder selected. Double-click to open it.");
@@ -366,10 +367,12 @@ void WorkspacePage::bindFileBrowser() {
             previewPdfPage_ = 1;
             previewingPdf_ = name.endsWith(".pdf", Qt::CaseInsensitive);
             if (visualPreviewable(name)) {
+                previewPending_ = true;
                 previewEmpty_->setText(QStringLiteral("Loading visual preview (%1 bytes)...").arg(size));
                 previewPages_->setCurrentWidget(previewEmpty_);
                 client_->previewAsset(id, name, previewPdfPage_);
             } else {
+                previewPending_ = true;
                 pdfControls_->hide();
                 previewText_->setPlainText(QStringLiteral("Loading preview (%1 bytes)...").arg(size));
                 previewPages_->setCurrentWidget(previewText_);
@@ -428,6 +431,7 @@ void WorkspacePage::setClient(QtClient* client) {
     });
     connect(client_, &QtClient::previewReady, this,
             [this](const QString& title, const QString& content, bool markdown, bool truncated) {
+        previewPending_ = false;
         previewTitle_->setText(title);
         pdfControls_->hide();
         const auto visibleContent = content + (truncated
@@ -465,6 +469,7 @@ void WorkspacePage::setClient(QtClient* client) {
     });
     connect(client_, &QtClient::previewAssetReady, this,
             [this](const QString& title, const QByteArray& bytes) {
+        previewPending_ = false;
         QPixmap pixmap;
         if (!pixmap.loadFromData(bytes)) {
             previewTitle_->setText(title);
@@ -509,11 +514,21 @@ void WorkspacePage::setClient(QtClient* client) {
         logMessage("Download finished");
     });
     connect(client_, &QtClient::errorOccurred, this,
-            [this](const QString& code, const QString&) {
+            [this](const QString& code, const QString& message) {
         if (previewingPdf_ && code == "BAD_REQUEST" && previewPdfPage_ > 1) {
+            previewPending_ = false;
             --previewPdfPage_;
             pdfPageLabel_->setText(QStringLiteral("Page %1").arg(previewPdfPage_));
             nextPageButton_->setEnabled(false);
+            return;
+        }
+        if (previewPending_) {
+            previewPending_ = false;
+            previewingPdf_ = false;
+            pdfControls_->hide();
+            previewTitle_->setText("Preview unavailable");
+            previewText_->setPlainText(QStringLiteral("[%1] %2").arg(code, message));
+            previewPages_->setCurrentWidget(previewText_);
         }
     });
 }
