@@ -9,12 +9,14 @@ set(CMAKE_AUTOMOC ON)
 
 add_executable(client_qt_example
   src/main.cpp
+  src/Theme.cpp
+  src/LoginPage.cpp
+  src/WorkspacePage.cpp
   src/FileBrowser.cpp
-  src/MainWindow.cpp
-  src/TransferManager.cpp
+  include/client_qt/Theme.h
+  include/client_qt/LoginPage.h
+  include/client_qt/WorkspacePage.h
   include/client_qt/FileBrowser.h
-  include/client_qt/MainWindow.h
-  include/client_qt/TransferManager.h
 )
 
 target_include_directories(client_qt_example PRIVATE

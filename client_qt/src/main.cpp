@@ -1,754 +1,117 @@
-#include <QAction>
-#include <QAbstractItemView>
+#include "client_qt/LoginPage.h"
+#include "client_qt/Theme.h"
+#include "client_qt/WorkspacePage.h"
+#include "cloud/client/QtClient.h"
+
 #include <QApplication>
-#include <QClipboard>
-#include <QFileDialog>
-#include <QFrame>
-#include <QFontDatabase>
-#include <QHeaderView>
-#include <QHBoxLayout>
-#include <QInputDialog>
-#include <QLabel>
-#include <QLineEdit>
-#include <QMessageBox>
-#include <QProgressBar>
-#include <QPlainTextEdit>
-#include <QPixmap>
-#include <QRegularExpression>
-#include <QPushButton>
-#include <QScrollArea>
 #include <QSettings>
 #include <QStackedWidget>
 #include <QStyle>
 #include <QStyleFactory>
-#include <QSplitter>
-#include <QTextEdit>
-#include <QToolBar>
-#include <QTableWidget>
 #include <QVBoxLayout>
-#include <QVector>
 #include <QWidget>
 
-#include <algorithm>
-#include <cmath>
+using namespace client_qt;
 
-#include "client_qt/FileBrowser.h"
-#include "cloud/client/QtClient.h"
-
-using namespace cloud::client;
-
-namespace {
-
-int progressPercent(qint64 done, qint64 total) {
-    if (total <= 0) return 0;
-    return std::clamp(static_cast<int>(std::round(
-                          static_cast<long double>(done) * 100.0L /
-                          static_cast<long double>(total))),
-                      0, 100);
-}
-
-QString normalizedExtractionCode(QString code) {
-    code.remove(QRegularExpression(QStringLiteral("[\\s-]")));
-    return code.toUpper();
-}
-
-QFrame *makeSurface(const char *name = "surface") {
-    auto *surface = new QFrame();
-    surface->setObjectName(name);
-    return surface;
-}
-
-QLabel *makeLabel(const QString &text, const char *name) {
-    auto *label = new QLabel(text);
-    label->setObjectName(name);
-    return label;
-}
-
-bool visualPreviewable(const QString &name) {
-    const auto extension=name.section('.',-1).toLower();
-    return extension=="png" || extension=="jpg" || extension=="jpeg" ||
-           extension=="bmp" || extension=="gif" || extension=="svg" ||
-           extension=="pdf";
-}
-
-bool codePreviewable(const QString &name) {
-    const auto extension=name.section('.',-1).toLower();
-    return extension=="cpp" || extension=="c" || extension=="h" || extension=="hpp" ||
-           extension=="py" || extension=="json" || extension=="cmake" || extension=="yml" ||
-           extension=="yaml" || extension=="tex";
-}
-
-QList<QString> splitTableRow(const QString &line, QChar separator) {
-    QList<QString> fields;
-    QString field;
-    bool quoted=false;
-    for (int i=0; i<line.size(); ++i) {
-        const auto character=line.at(i);
-        if (character=='"' && quoted && i+1<line.size() && line.at(i+1)=='"') {
-            field+='"'; ++i;
-        } else if (character=='"') quoted=!quoted;
-        else if (character==separator && !quoted) { fields.append(field); field.clear(); }
-        else field+=character;
-    }
-    fields.append(field);
-    return fields;
-}
-
-} // namespace
-
-int main(int argc, char **argv) {
+int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setApplicationName("LanCloudDrive");
     app.setOrganizationName("cpp-project2026");
     app.setStyle(QStyleFactory::create("Fusion"));
-    app.setStyleSheet(R"(
-        QWidget { background: #f6f8fa; color: #1f2328; font-family: "Segoe UI"; font-size: 13px; }
-        QFrame#surface, QFrame#loginForm, QFrame#sideSurface {
-            background: #ffffff; border: 1px solid #d0d7de; border-radius: 6px;
-        }
-        QFrame#introPanel { background: #f6f8fa; border: none; }
-        QFrame#topBar { background: #ffffff; border: none; border-bottom: 1px solid #d8dee4; }
-        QLabel#brand { color: #1f2328; font-size: 18px; font-weight: 650; }
-        QLabel#loginTitle { color: #1f2328; font-size: 26px; font-weight: 650; }
-        QLabel#pageTitle { color: #1f2328; font-size: 20px; font-weight: 650; }
-        QLabel#sectionTitle { color: #1f2328; font-size: 14px; font-weight: 650; }
-        QLabel#eyebrow { color: #0969da; font-size: 12px; font-weight: 650; }
-        QLabel#muted { color: #59636e; }
-        QLabel#statusPill { background: #ddf4ff; color: #0969da; border-radius: 10px; padding: 3px 9px; }
-        QLabel#featureIcon { background: #ddf4ff; color: #0969da; border-radius: 16px; font-size: 16px; font-weight: 700; }
-        QLineEdit {
-            background: #ffffff; border: 1px solid #818b98; border-radius: 6px;
-            padding: 8px 10px; min-height: 20px; selection-background-color: #0969da;
-        }
-        QLineEdit:focus { border: 2px solid #0969da; padding: 7px 9px; }
-        QPushButton {
-            background: #0969da; color: #ffffff; border: 1px solid #0969da;
-            border-radius: 6px; padding: 8px 14px; font-weight: 600;
-        }
-        QPushButton:hover { background: #0860ca; }
-        QPushButton:pressed { background: #0757ba; }
-        QPushButton#secondaryButton {
-            background: #f6f8fa; color: #1f2328; border-color: #d0d7de;
-        }
-        QPushButton#secondaryButton:hover { background: #eef1f4; }
-        QToolBar { background: #ffffff; border: none; spacing: 4px; padding: 0; }
-        QToolButton {
-            background: #f6f8fa; color: #1f2328; border: 1px solid #d0d7de;
-            border-radius: 6px; padding: 7px 10px; font-weight: 550;
-        }
-        QToolButton:hover { background: #eef1f4; border-color: #afb8c1; }
-        QTreeView {
-            background: #ffffff; alternate-background-color: #ffffff; border: 1px solid #d0d7de;
-            border-radius: 6px; outline: none; show-decoration-selected: 1;
-        }
-        QHeaderView::section {
-            background: #f6f8fa; color: #59636e; border: none;
-            border-bottom: 1px solid #d0d7de; padding: 9px 10px; font-weight: 600;
-        }
-        QTreeView::item { padding: 8px 7px; border-bottom: 1px solid #eaeef2; }
-        QTreeView::item:hover { background: #f6f8fa; }
-        QTreeView::item:selected { background: #ddf4ff; color: #1f2328; }
-        QTextEdit {
-            background: #f6f8fa; color: #59636e; border: 1px solid #d8dee4;
-            border-radius: 6px; padding: 6px;
-        }
-        QProgressBar {
-            background: #eaeef2; border: none; border-radius: 3px;
-            min-height: 6px; max-height: 6px; color: transparent;
-        }
-        QProgressBar::chunk { background: #0969da; border-radius: 3px; }
-        QMenu { background: #ffffff; border: 1px solid #d0d7de; padding: 4px; }
-        QMenu::item { padding: 7px 28px 7px 10px; border-radius: 4px; }
-        QMenu::item:selected { background: #ddf4ff; color: #1f2328; }
-    )");
+
+    QSettings settings;
+    bool dark = settings.value("ui/dark", false).toBool();
 
     QWidget window;
     window.setWindowTitle("LanCloudDrive");
     window.setMinimumSize(1040, 700);
     window.resize(1240, 790);
-    auto *windowLayout = new QVBoxLayout(&window);
-    windowLayout->setContentsMargins(0, 0, 0, 0);
-    auto *pages = new QStackedWidget();
-    windowLayout->addWidget(pages);
 
-    // Authentication is intentionally separate from the file workspace.
-    auto *loginPage = new QWidget();
-    auto *loginPageLayout = new QVBoxLayout(loginPage);
-    loginPageLayout->setContentsMargins(52, 34, 52, 52);
-    auto *loginBrandRow = new QHBoxLayout();
-    auto *loginBrand = makeLabel("LanCloudDrive", "brand");
-    auto *lanBadge = makeLabel("LAN file workspace", "statusPill");
-    loginBrandRow->addWidget(loginBrand);
-    loginBrandRow->addStretch();
-    loginBrandRow->addWidget(lanBadge);
-    loginPageLayout->addLayout(loginBrandRow);
-    loginPageLayout->addStretch();
-
-    auto *loginContent = new QWidget();
-    loginContent->setMaximumWidth(960);
-    auto *loginContentLayout = new QHBoxLayout(loginContent);
-    loginContentLayout->setContentsMargins(0, 0, 0, 0);
-    loginContentLayout->setSpacing(64);
-
-    auto *intro = makeSurface("introPanel");
-    auto *introLayout = new QVBoxLayout(intro);
-    introLayout->setContentsMargins(0, 12, 20, 12);
-    introLayout->setSpacing(12);
-    introLayout->addWidget(makeLabel("PRIVATE CLOUD · LOCAL NETWORK", "eyebrow"));
-    introLayout->addWidget(makeLabel("Files for your team,\nkept on your network.", "loginTitle"));
-    auto *introText = makeLabel(
-        "One computer runs the server. Other computers on the same LAN connect with its IP address.",
-        "muted");
-    introText->setWordWrap(true);
-    introLayout->addWidget(introText);
-    introLayout->addSpacing(18);
-    const QStringList features = {
-        "Upload and download complete folders",
-        "Switch accounts with an automatic refresh",
-        "Transfer progress and local activity history"
-    };
-    for (const auto &feature : features) {
-        auto *row = new QHBoxLayout();
-        auto *icon = makeLabel("✓", "featureIcon");
-        icon->setFixedSize(32, 32);
-        icon->setAlignment(Qt::AlignCenter);
-        auto *textLabel = new QLabel(feature);
-        textLabel->setWordWrap(true);
-        row->addWidget(icon);
-        row->addSpacing(8);
-        row->addWidget(textLabel, 1);
-        introLayout->addLayout(row);
-    }
-    introLayout->addStretch();
-
-    QSettings settings;
-    auto *loginForm = makeSurface("loginForm");
-    loginForm->setFixedWidth(390);
-    auto *formLayout = new QVBoxLayout(loginForm);
-    formLayout->setContentsMargins(30, 30, 30, 30);
-    formLayout->setSpacing(10);
-    formLayout->addWidget(makeLabel("Sign in", "pageTitle"));
-    formLayout->addWidget(makeLabel("Connect to your LanCloudDrive server", "muted"));
-    formLayout->addSpacing(10);
-    formLayout->addWidget(makeLabel("Server", "sectionTitle"));
-    auto *serverRow = new QHBoxLayout();
-    auto *hostEdit = new QLineEdit(settings.value("server/host", "127.0.0.1").toString());
-    hostEdit->setPlaceholderText("Server IP address");
-    auto *portEdit = new QLineEdit(settings.value("server/port", "9000").toString());
-    portEdit->setPlaceholderText("Port");
-    portEdit->setMaximumWidth(88);
-    serverRow->addWidget(hostEdit, 1);
-    serverRow->addWidget(portEdit);
-    formLayout->addLayout(serverRow);
-    formLayout->addWidget(makeLabel("Account", "sectionTitle"));
-    auto *userEdit = new QLineEdit();
-    userEdit->setPlaceholderText("Username");
-    auto *passEdit = new QLineEdit();
-    passEdit->setPlaceholderText("Password");
-    passEdit->setEchoMode(QLineEdit::Password);
-    auto *loginButton = new QPushButton("Sign in");
-    auto *registerButton = new QPushButton("Create account");
-    registerButton->setObjectName("secondaryButton");
-    auto *loginStatus = makeLabel("Use this computer's LAN IP when signing in from another device.", "muted");
-    loginStatus->setWordWrap(true);
-    formLayout->addWidget(userEdit);
-    formLayout->addWidget(passEdit);
-    formLayout->addSpacing(4);
-    formLayout->addWidget(loginButton);
-    formLayout->addWidget(registerButton);
-    formLayout->addSpacing(6);
-    formLayout->addWidget(loginStatus);
-    loginContentLayout->addWidget(intro, 1);
-    loginContentLayout->addWidget(loginForm);
-    loginPageLayout->addWidget(loginContent, 0, Qt::AlignHCenter);
-    loginPageLayout->addStretch();
-
-    // Main file workspace.
-    auto *workspacePage = new QWidget();
-    auto *workspacePageLayout = new QVBoxLayout(workspacePage);
-    workspacePageLayout->setContentsMargins(0, 0, 0, 0);
-    workspacePageLayout->setSpacing(0);
-    auto *topBar = makeSurface("topBar");
-    auto *topLayout = new QHBoxLayout(topBar);
-    topLayout->setContentsMargins(24, 13, 24, 13);
-    auto *workspaceBrand = makeLabel("LanCloudDrive", "brand");
-    auto *serverBadge = makeLabel("Offline", "statusPill");
-    auto *accountLabel = makeLabel("", "sectionTitle");
-    auto *logoutButton = new QPushButton("Sign out");
-    logoutButton->setObjectName("secondaryButton");
-    topLayout->addWidget(workspaceBrand);
-    topLayout->addSpacing(12);
-    topLayout->addWidget(serverBadge);
-    topLayout->addStretch();
-    topLayout->addWidget(accountLabel);
-    topLayout->addSpacing(8);
-    topLayout->addWidget(logoutButton);
-    workspacePageLayout->addWidget(topBar);
-
-    auto *workspaceBody = new QWidget();
-    auto *bodyLayout = new QHBoxLayout(workspaceBody);
-    bodyLayout->setContentsMargins(24, 22, 24, 24);
-    bodyLayout->setSpacing(16);
-    auto *fileSurface = makeSurface();
-    auto *fileLayout = new QVBoxLayout(fileSurface);
-    fileLayout->setContentsMargins(18, 16, 18, 18);
-    fileLayout->setSpacing(12);
-    auto *fileHeading = new QHBoxLayout();
-    auto *headingColumn = new QVBoxLayout();
-    auto *locationLabel = makeLabel("My files", "pageTitle");
-    auto *itemCount = makeLabel("0 items", "muted");
-    headingColumn->addWidget(locationLabel);
-    headingColumn->addWidget(itemCount);
-    fileHeading->addLayout(headingColumn);
-    fileHeading->addStretch();
-    auto *toolbar = new QToolBar();
-    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
-    auto *upAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_ArrowUp), "Up");
-    auto *refreshAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_BrowserReload), "Refresh");
-    auto *newFolderAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DirIcon), "New folder");
-    auto *uploadFileAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_FileIcon), "Upload file");
-    auto *uploadFolderAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DirOpenIcon), "Upload folder");
-    auto *claimCodeAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_DialogOpenButton), "Extract code");
-    fileHeading->addWidget(toolbar);
-    auto *browser = new FileBrowser();
-    fileLayout->addLayout(fileHeading);
-    fileLayout->addWidget(browser, 1);
-
-    auto *previewColumn = new QWidget();
-    auto *sideColumn = new QVBoxLayout(previewColumn);
-    sideColumn->setSpacing(12);
-    auto *transferSurface = makeSurface("sideSurface");
-    auto *transferLayout = new QVBoxLayout(transferSurface);
-    transferLayout->setContentsMargins(16, 15, 16, 16);
-    transferLayout->setSpacing(8);
-    transferLayout->addWidget(makeLabel("Transfers", "sectionTitle"));
-    auto *uploadLabel = makeLabel("Upload idle", "muted");
-    auto *uploadProgress = new QProgressBar();
-    uploadProgress->setRange(0, 100);
-    auto *downloadLabel = makeLabel("Download idle", "muted");
-    auto *downloadProgress = new QProgressBar();
-    downloadProgress->setRange(0, 100);
-    transferLayout->addWidget(uploadLabel);
-    transferLayout->addWidget(uploadProgress);
-    transferLayout->addSpacing(5);
-    transferLayout->addWidget(downloadLabel);
-    transferLayout->addWidget(downloadProgress);
-
-    auto *activitySurface = makeSurface("sideSurface");
-    auto *activityLayout = new QVBoxLayout(activitySurface);
-    activityLayout->setContentsMargins(16, 15, 16, 16);
-    activityLayout->setSpacing(9);
-    activityLayout->addWidget(makeLabel("Activity", "sectionTitle"));
-    auto *log = new QTextEdit();
-    log->setReadOnly(true);
-    log->setPlaceholderText("Recent activity appears here");
-    activityLayout->addWidget(log);
-    auto *previewSurface = makeSurface("sideSurface");
-    auto *previewLayout = new QVBoxLayout(previewSurface);
-    previewLayout->setContentsMargins(16, 15, 16, 16);
-    previewLayout->setSpacing(6);
-    previewLayout->addWidget(makeLabel("Preview", "sectionTitle"));
-    auto *previewTitle = makeLabel("Select a file", "muted");
-    auto *pdfControls = new QWidget();
-    auto *pdfControlLayout = new QHBoxLayout(pdfControls);
-    pdfControlLayout->setContentsMargins(0,0,0,0);
-    auto *previousPageButton = new QPushButton("Previous");
-    previousPageButton->setObjectName("secondaryButton");
-    auto *pdfPageLabel = makeLabel("Page 1", "muted");
-    auto *nextPageButton = new QPushButton("Next");
-    nextPageButton->setObjectName("secondaryButton");
-    pdfControlLayout->addWidget(previousPageButton);
-    pdfControlLayout->addWidget(pdfPageLabel,1,Qt::AlignCenter);
-    pdfControlLayout->addWidget(nextPageButton);
-    pdfControls->hide();
-    auto *previewPages = new QStackedWidget();
-    auto *previewEmpty = makeLabel("Select a file to view its contents.", "muted");
-    previewEmpty->setAlignment(Qt::AlignCenter);
-    auto *previewText = new QTextEdit();
-    previewText->setReadOnly(true);
-    previewText->setPlaceholderText("Select a text or Markdown file to preview its content.");
-    auto *previewCode = new QPlainTextEdit();
-    previewCode->setReadOnly(true);
-    previewCode->setLineWrapMode(QPlainTextEdit::NoWrap);
-    previewCode->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
-    auto *previewTable = new QTableWidget();
-    previewTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    previewTable->setAlternatingRowColors(true);
-    previewTable->horizontalHeader()->setStretchLastSection(true);
-    auto *previewImage = new QLabel();
-    previewImage->setAlignment(Qt::AlignCenter);
-    auto *previewImageScroll = new QScrollArea();
-    previewImageScroll->setWidget(previewImage);
-    previewImageScroll->setWidgetResizable(false);
-    previewImageScroll->setAlignment(Qt::AlignCenter);
-    previewPages->addWidget(previewEmpty);
-    previewPages->addWidget(previewText);
-    previewPages->addWidget(previewCode);
-    previewPages->addWidget(previewTable);
-    previewPages->addWidget(previewImageScroll);
-    previewLayout->addWidget(previewTitle);
-    previewLayout->addWidget(pdfControls);
-    previewLayout->addWidget(previewPages, 1);
-    sideColumn->addWidget(previewSurface, 5);
-    sideColumn->addWidget(transferSurface);
-    sideColumn->addWidget(activitySurface, 1);
-    auto *contentSplitter = new QSplitter(Qt::Horizontal);
-    contentSplitter->addWidget(fileSurface);
-    contentSplitter->addWidget(previewColumn);
-    contentSplitter->setStretchFactor(0, 3);
-    contentSplitter->setStretchFactor(1, 2);
-    contentSplitter->setSizes({690, 460});
-    bodyLayout->addWidget(contentSplitter, 1);
-    workspacePageLayout->addWidget(workspaceBody, 1);
-
+    auto* pages = new QStackedWidget();
+    auto* loginPage = new LoginPage(&window);
+    auto* workspacePage = new WorkspacePage(&window);
     pages->addWidget(loginPage);
     pages->addWidget(workspacePage);
     pages->setCurrentWidget(loginPage);
 
-    QtClient *client = nullptr;
-    qint64 currentParent = 0;
-    QVector<qint64> parentStack;
-    QStringList pathNames;
-    qint64 previewNodeId = 0;
-    qint64 previewPdfPage = 1;
-    bool previewingPdf = false;
+    auto* windowLayout = new QVBoxLayout(&window);
+    windowLayout->setContentsMargins(0, 0, 0, 0);
+    windowLayout->addWidget(pages);
 
-    const auto updateLocation = [&]() {
-        locationLabel->setText(pathNames.isEmpty()
-            ? QStringLiteral("My files")
-            : QStringLiteral("My files / %1").arg(pathNames.join(" / ")));
-        upAction->setEnabled(!parentStack.isEmpty());
+    const auto applyTheme = [&]() {
+        app.setStyleSheet(themeStyleSheet(dark));
+        loginPage->setDark(dark);
+        workspacePage->setDark(dark);
+        settings.setValue("ui/dark", dark);
     };
-    const auto doList = [&](qint64 parentId) {
-        if (!client) return;
-        log->append(QStringLiteral("Refreshing folder %1...").arg(parentId));
-        client->list(parentId);
+    applyTheme();
+
+    const auto toggleTheme = [&]() {
+        dark = !dark;
+        applyTheme();
     };
-    const auto bindClient = [&](QtClient *boundClient) {
-        QObject::connect(boundClient, &QtClient::registerFinished, [&]() {
-            loginStatus->setStyleSheet("color: #1a7f37;");
-            loginStatus->setText("Account created. Sign in with the same credentials.");
+    QObject::connect(loginPage, &LoginPage::themeToggleRequested, &window, toggleTheme);
+    QObject::connect(workspacePage, &WorkspacePage::themeToggleRequested, &window, toggleTheme);
+
+    cloud::client::QtClient* client = nullptr;
+
+    const auto connectClient = [&](cloud::client::QtClient* c) {
+        QObject::connect(c, &cloud::client::QtClient::registerFinished, &window, [&]() {
+            loginPage->setStatus("Account created. Sign in with the same credentials.",
+                                 LoginPage::Status::Ok);
         });
-        QObject::connect(boundClient, &QtClient::loginFinished, [&]() {
-            currentParent = 0;
-            parentStack.clear();
-            pathNames.clear();
-            updateLocation();
-            accountLabel->setText(userEdit->text().trimmed());
-            serverBadge->setText(QStringLiteral("%1:%2").arg(hostEdit->text().trimmed(), portEdit->text()));
+        QObject::connect(c, &cloud::client::QtClient::loginFinished, &window, [&]() {
+            workspacePage->setAccount(loginPage->host(), loginPage->port(), loginPage->username());
             pages->setCurrentWidget(workspacePage);
-            doList(0);
+            workspacePage->refresh();
+            loginPage->setStatus("Signed in.", LoginPage::Status::Ok);
         });
-        QObject::connect(boundClient, &QtClient::logoutFinished, [&]() {
-            browser->setEntries({});
+        QObject::connect(c, &cloud::client::QtClient::logoutFinished, &window, [&]() {
+            workspacePage->clear();
+            workspacePage->setServerOffline();
             pages->setCurrentWidget(loginPage);
-            loginStatus->setStyleSheet("color: #59636e;");
-            loginStatus->setText("Signed out. Sign in to refresh another account.");
+            loginPage->setStatus("Signed out. Sign in to refresh another account.",
+                                 LoginPage::Status::Info);
         });
-        QObject::connect(boundClient, &QtClient::errorOccurred,
-                         [&](const QString &code, const QString &message) {
-            log->append(QStringLiteral("ERROR [%1] %2").arg(code, message));
-            if (previewingPdf && code == "BAD_REQUEST" && previewPdfPage > 1) {
-                --previewPdfPage;
-                pdfPageLabel->setText(QStringLiteral("Page %1").arg(previewPdfPage));
-                nextPageButton->setEnabled(false);
-            }
+        QObject::connect(c, &cloud::client::QtClient::errorOccurred, &window,
+                         [&](const QString& code, const QString& message) {
             if (pages->currentWidget() == loginPage) {
-                loginStatus->setStyleSheet("color: #cf222e;");
-                loginStatus->setText(QStringLiteral("%1: %2").arg(code, message));
-            }
-        });
-        QObject::connect(boundClient, &QtClient::listReady, [&](const QVariantList &entries) {
-            browser->setEntries(entries);
-            itemCount->setText(QStringLiteral("%1 item%2").arg(entries.size())
-                               .arg(entries.size() == 1 ? "" : "s"));
-            log->append(QStringLiteral("Folder refreshed: %1 entries").arg(entries.size()));
-        });
-        QObject::connect(boundClient, &QtClient::mkdirFinished, [&](qint64) {
-            log->append("Folder created");
-            doList(currentParent);
-        });
-        QObject::connect(boundClient, &QtClient::renameFinished, [&]() {
-            log->append("Item renamed");
-            doList(currentParent);
-        });
-        QObject::connect(boundClient, &QtClient::deleteFinished, [&]() {
-            log->append("Item deleted");
-            doList(currentParent);
-        });
-        QObject::connect(boundClient, &QtClient::shareCodeCreated, [&](const QString &code) {
-            const auto displayCode = code.toUpper();
-            const auto groupedCode = QStringLiteral("%1-%2")
-                                         .arg(displayCode.left(4), displayCode.mid(4));
-            QApplication::clipboard()->setText(displayCode);
-            log->append(QStringLiteral("Extraction code created: %1").arg(displayCode));
-            QMessageBox::information(&window, "Extraction code",
-                                     QStringLiteral("Send this code to the recipient:\n\n%1\n\n"
-                                                    "It has been copied to the clipboard. It is valid for 24 hours "
-                                                    "and can be claimed once.")
-                                         .arg(groupedCode));
-        });
-        QObject::connect(boundClient, &QtClient::shareCodeClaimed, [&](qint64 nodeId) {
-            currentParent = 0;
-            parentStack.clear();
-            pathNames.clear();
-            updateLocation();
-            log->append(QStringLiteral("Extraction code claimed, new node %1").arg(nodeId));
-            QMessageBox::information(&window, "File received",
-                                     "The shared file was added to My files.");
-            doList(0);
-        });
-        QObject::connect(boundClient, &QtClient::previewReady,
-                         [&](const QString &title, const QString &content, bool markdown, bool truncated) {
-            previewTitle->setText(title);
-            pdfControls->hide();
-            const auto visibleContent=content + (truncated
-                ? QStringLiteral("\n\n[Preview limited to the first 512 KiB]")
-                : QString());
-            const auto extension=title.section('.',-1).toLower();
-            if (codePreviewable(title)) {
-                previewCode->setPlainText(visibleContent);
-                previewPages->setCurrentWidget(previewCode);
-            } else if (extension=="csv" || extension=="tsv") {
-                const auto rows=visibleContent.split('\n',Qt::SkipEmptyParts);
-                const auto separator=extension=="tsv" ? QChar('\t') : QChar(',');
-                const auto headers=rows.isEmpty() ? QList<QString>{} : splitTableRow(rows.first(),separator);
-                const int columnCount=headers.size()>50 ? 50 : static_cast<int>(headers.size());
-                previewTable->clear();
-                previewTable->setColumnCount(columnCount);
-                const int rowCount=rows.size()>1001 ? 1000 : static_cast<int>(rows.size()>0 ? rows.size()-1 : 0);
-                previewTable->setRowCount(rowCount);
-                for (int column=0; column<columnCount; ++column)
-                    previewTable->setHorizontalHeaderItem(column,new QTableWidgetItem(headers.at(column)));
-                for (int row=0; row<previewTable->rowCount(); ++row) {
-                    const auto fields=splitTableRow(rows.at(row+1),separator);
-                    const int fieldCount=fields.size()>columnCount ? columnCount : static_cast<int>(fields.size());
-                    for (int column=0; column<fieldCount; ++column)
-                        previewTable->setItem(row,column,new QTableWidgetItem(fields.at(column)));
-                }
-                previewPages->setCurrentWidget(previewTable);
+                loginPage->setStatus(QStringLiteral("%1: %2").arg(code, message),
+                                     LoginPage::Status::Error);
             } else {
-                if (markdown) previewText->setMarkdown(visibleContent);
-                else previewText->setPlainText(visibleContent);
-                previewPages->setCurrentWidget(previewText);
+                workspacePage->logError(code, message);
             }
-            if (markdown) log->append(QStringLiteral("Markdown preview loaded: %1").arg(title));
-        });
-        QObject::connect(boundClient, &QtClient::previewAssetReady,
-                         [&](const QString &title, const QByteArray &bytes) {
-            QPixmap pixmap;
-            if (!pixmap.loadFromData(bytes)) {
-                previewTitle->setText(title);
-                previewText->setPlainText("The server returned an unreadable preview image.");
-                previewPages->setCurrentWidget(previewText);
-                return;
-            }
-            previewTitle->setText(title);
-            const auto scaled=pixmap.scaled(previewImageScroll->viewport()->size(),
-                                            Qt::KeepAspectRatio,Qt::SmoothTransformation);
-            previewImage->setPixmap(scaled);
-            previewImage->resize(scaled.size());
-            previewPages->setCurrentWidget(previewImageScroll);
-            pdfControls->setVisible(previewingPdf);
-            previousPageButton->setEnabled(previewPdfPage > 1);
-            nextPageButton->setEnabled(true);
-            pdfPageLabel->setText(QStringLiteral("Page %1").arg(previewPdfPage));
-        });
-        QObject::connect(boundClient, &QtClient::markdownSaved, [&](qint64 nodeId) {
-            log->append(QStringLiteral("Markdown file saved, node %1").arg(nodeId));
-            doList(currentParent);
-        });
-        QObject::connect(boundClient, &QtClient::uploadProgress, [&](qint64 done, qint64 total) {
-            const int percent = progressPercent(done, total);
-            uploadProgress->setValue(percent);
-            uploadLabel->setText(QStringLiteral("Uploading · %1%").arg(percent));
-        });
-        QObject::connect(boundClient, &QtClient::uploadFinished, [&](qint64 nodeId) {
-            uploadProgress->setValue(100);
-            uploadLabel->setText("Upload complete");
-            log->append(QStringLiteral("Upload finished, node %1").arg(nodeId));
-            doList(currentParent);
-        });
-        QObject::connect(boundClient, &QtClient::downloadProgress, [&](qint64 done, qint64 total) {
-            const int percent = progressPercent(done, total);
-            downloadProgress->setValue(percent);
-            downloadLabel->setText(QStringLiteral("Downloading · %1%").arg(percent));
-        });
-        QObject::connect(boundClient, &QtClient::downloadFinished, [&]() {
-            downloadProgress->setValue(100);
-            downloadLabel->setText("Download complete");
-            log->append("Download finished");
         });
     };
 
-    const auto rebuildClient = [&]() {
-        if (client) delete client;
-        const QString host = hostEdit->text().trimmed();
-        const quint16 port = static_cast<quint16>(portEdit->text().toUShort());
+    const auto rebuildClient = [&](const QString& host, quint16 port) {
+        if (client) {
+            delete client;
+            client = nullptr;
+        }
         settings.setValue("server/host", host);
-        settings.setValue("server/port", portEdit->text());
-        client = new QtClient(host, port, &window);
-        bindClient(client);
-        loginStatus->setStyleSheet("color: #59636e;");
-        loginStatus->setText(QStringLiteral("Connecting to %1:%2...").arg(host).arg(port));
+        settings.setValue("server/port", QString::number(port));
+        client = new cloud::client::QtClient(host, port, &window);
+        workspacePage->setClient(client);
+        connectClient(client);
+        loginPage->setStatus(QStringLiteral("Connecting to %1:%2...").arg(host).arg(port),
+                             LoginPage::Status::Info);
     };
 
-    QObject::connect(loginButton, &QPushButton::clicked, [&]() {
-        if (hostEdit->text().trimmed().isEmpty() || portEdit->text().toUShort() == 0 ||
-            userEdit->text().trimmed().isEmpty() || passEdit->text().isEmpty()) {
-            loginStatus->setStyleSheet("color: #cf222e;");
-            loginStatus->setText("Enter a server address, username, and password.");
-            return;
-        }
-        rebuildClient();
-        client->login(userEdit->text(), passEdit->text());
+    QObject::connect(loginPage, &LoginPage::loginRequested, &window,
+                     [&](const QString& host, quint16 port, const QString& user, const QString& pass) {
+        rebuildClient(host, port);
+        client->login(user, pass);
     });
-    QObject::connect(registerButton, &QPushButton::clicked, [&]() {
-        if (hostEdit->text().trimmed().isEmpty() || portEdit->text().toUShort() == 0 ||
-            userEdit->text().trimmed().isEmpty() || passEdit->text().isEmpty()) {
-            loginStatus->setStyleSheet("color: #cf222e;");
-            loginStatus->setText("Enter a server address, username, and password first.");
-            return;
-        }
-        rebuildClient();
-        client->registerUser(userEdit->text(), passEdit->text());
+    QObject::connect(loginPage, &LoginPage::registerRequested, &window,
+                     [&](const QString& host, quint16 port, const QString& user, const QString& pass) {
+        rebuildClient(host, port);
+        client->registerUser(user, pass);
     });
-    QObject::connect(passEdit, &QLineEdit::returnPressed, loginButton, &QPushButton::click);
-    QObject::connect(logoutButton, &QPushButton::clicked, [&]() {
+    QObject::connect(workspacePage, &WorkspacePage::logoutRequested, &window, [&]() {
         if (client) client->logout();
     });
-    QObject::connect(refreshAction, &QAction::triggered, [&]() { doList(currentParent); });
-    QObject::connect(upAction, &QAction::triggered, [&]() {
-        if (parentStack.isEmpty()) return;
-        currentParent = parentStack.takeLast();
-        if (!pathNames.isEmpty()) pathNames.removeLast();
-        updateLocation();
-        doList(currentParent);
-    });
-    QObject::connect(newFolderAction, &QAction::triggered, [&]() {
-        if (!client) return;
-        bool ok = false;
-        const QString name = QInputDialog::getText(&window, "New folder", "Folder name:",
-                                                    QLineEdit::Normal, {}, &ok).trimmed();
-        if (ok && !name.isEmpty()) client->mkdir(currentParent, name);
-    });
-    QObject::connect(uploadFileAction, &QAction::triggered, [&]() {
-        const QString path = QFileDialog::getOpenFileName(&window, "Select file to upload");
-        if (path.isEmpty() || !client) return;
-        uploadProgress->setValue(0);
-        uploadLabel->setText("Preparing file upload...");
-        log->append(QStringLiteral("Uploading file %1").arg(path));
-        client->upload(path, currentParent, QString());
-    });
-    QObject::connect(uploadFolderAction, &QAction::triggered, [&]() {
-        const QString path = QFileDialog::getExistingDirectory(&window, "Select folder to upload");
-        if (path.isEmpty() || !client) return;
-        uploadProgress->setValue(0);
-        uploadLabel->setText("Preparing folder upload...");
-        log->append(QStringLiteral("Uploading folder %1").arg(path));
-        client->uploadDirectory(path, currentParent);
-    });
-    QObject::connect(claimCodeAction, &QAction::triggered, [&]() {
-        if (!client) return;
-        bool ok = false;
-        const QString enteredCode = QInputDialog::getText(&window, "Extract shared file",
-                                                           "8-character code (for example: A1B2-C3D4):",
-                                                           QLineEdit::Normal, {}, &ok);
-        if (!ok) return;
-        const QString code = normalizedExtractionCode(enteredCode);
-        static const QRegularExpression validCode(QStringLiteral("^[0-9A-F]{8}$"));
-        if (!validCode.match(code).hasMatch()) {
-            QMessageBox::warning(&window, "Invalid extraction code",
-                                 "Enter the 8-character code created by the sender. "
-                                 "Only 0-9 and A-F are allowed; spaces and hyphens are optional.");
-            return;
-        }
-        client->claimShareCode(code);
-    });
-    QObject::connect(browser, &FileBrowser::enterDirectory,
-                     [&](qint64 id, const QString &name) {
-        parentStack.append(currentParent);
-        pathNames.append(name);
-        currentParent = id;
-        updateLocation();
-        doList(currentParent);
-    });
-    QObject::connect(browser, &FileBrowser::downloadNode,
-                     [&](qint64 id, const QString &name, bool directory) {
-        if (!client) return;
-        downloadProgress->setValue(0);
-        if (directory) {
-            const QString parent = QFileDialog::getExistingDirectory(
-                &window, "Choose where to save the folder");
-            if (parent.isEmpty()) return;
-            downloadLabel->setText("Preparing folder download...");
-            log->append(QStringLiteral("Downloading folder %1 to %2").arg(name, parent));
-            client->downloadDirectory(id, name, parent);
-            return;
-        }
-        const QString save = QFileDialog::getSaveFileName(&window, "Save file as", name);
-        if (save.isEmpty()) return;
-        downloadLabel->setText("Preparing file download...");
-        log->append(QStringLiteral("Downloading %1 to %2").arg(name, save));
-        client->download(id, save);
-    });
-    QObject::connect(browser, &FileBrowser::renameNode, [&](qint64 id) {
-        bool ok = false;
-        const QString name = QInputDialog::getText(&window, "Rename", "New name:",
-                                                    QLineEdit::Normal, {}, &ok).trimmed();
-        if (ok && !name.isEmpty() && client) client->renameNode(id, name);
-    });
-    QObject::connect(browser, &FileBrowser::deleteNode, [&](qint64 id) {
-        if (!client) return;
-        if (QMessageBox::question(&window, "Delete item",
-                                  "Delete this item from the server? This cannot be undone.")
-            == QMessageBox::Yes) {
-            client->deleteNode(id);
-        }
-    });
-    QObject::connect(browser, &FileBrowser::createShareCode, [&](qint64 id) {
-        if (client) client->createShareCode(id);
-    });
-    QObject::connect(browser, &FileBrowser::nodeSelected,
-                     [&](qint64 id, const QString &name, bool directory, qint64 size) {
-        previewTitle->setText(name);
-        if (directory) {
-            previewingPdf=false;
-            pdfControls->hide();
-            previewEmpty->setText("Folder selected. Double-click to open it.");
-            previewPages->setCurrentWidget(previewEmpty);
-        } else if (client) {
-            previewNodeId=id;
-            previewPdfPage=1;
-            previewingPdf=name.endsWith(".pdf",Qt::CaseInsensitive);
-            if (visualPreviewable(name)) {
-                previewEmpty->setText(QStringLiteral("Loading visual preview (%1 bytes)...").arg(size));
-                previewPages->setCurrentWidget(previewEmpty);
-                client->previewAsset(id,name,previewPdfPage);
-            } else {
-                pdfControls->hide();
-                previewText->setPlainText(QStringLiteral("Loading preview (%1 bytes)...").arg(size));
-                previewPages->setCurrentWidget(previewText);
-                client->preview(id);
-            }
-        }
-    });
-    QObject::connect(browser, &FileBrowser::convertToMarkdown, [&](qint64 id) {
-        if (client) client->convertToMarkdown(id);
-    });
-    QObject::connect(previousPageButton, &QPushButton::clicked, [&]() {
-        if (!client || !previewingPdf || previewPdfPage <= 1) return;
-        --previewPdfPage;
-        client->previewAsset(previewNodeId,previewTitle->text(),previewPdfPage);
-    });
-    QObject::connect(nextPageButton, &QPushButton::clicked, [&]() {
-        if (!client || !previewingPdf) return;
-        ++previewPdfPage;
-        client->previewAsset(previewNodeId,previewTitle->text(),previewPdfPage);
-    });
-    QObject::connect(browser, &FileBrowser::refreshRequested, [&]() { doList(currentParent); });
 
-    updateLocation();
     window.show();
     return app.exec();
 }
