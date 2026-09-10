@@ -30,6 +30,7 @@ signals:
     void previewHoverEnded();
 
 private slots:
+    void onClicked(const QModelIndex &index);
     void onActivated(const QModelIndex &index);
     void onContextMenuRequested(const QPoint &pos);
     void onHoverTimeout();

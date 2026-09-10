@@ -69,7 +69,14 @@ std::string defaultMarkdownName(const std::string& sourceName) {
 }
 
 std::string lowerExtension(const std::string& name) {
-    auto extension=std::filesystem::path(name).extension().string();
+    // 文件名来自 UTF-8 JSON。Windows 下直接用 filesystem::path(string)
+    // 解析包含中文的名字可能触发当前代码页转换异常；这里只识别扩展名，
+    // 在 UTF-8 字节串上查找最后一个路径分隔符和句点即可。
+    const auto slash=name.find_last_of("/\\");
+    const auto dot=name.find_last_of('.');
+    std::string extension;
+    if(dot!=std::string::npos && (slash==std::string::npos || dot>slash))
+        extension=name.substr(dot);
     std::transform(extension.begin(),extension.end(),extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return extension;

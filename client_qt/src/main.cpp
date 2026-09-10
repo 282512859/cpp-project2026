@@ -7,11 +7,13 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMovie>
 #include <QPlainTextEdit>
+#include <QPainter>
 #include <QPixmap>
 #include <QProgressBar>
 #include <QPushButton>
@@ -275,6 +277,19 @@ int main(int argc, char **argv) {
     QApplication app(argc, argv);
     app.setApplicationName("LanCloudDrive");
     app.setOrganizationName("cpp-project2026");
+    // 设置应用级图标，确保窗口和 Windows 任务栏显示 LanCloudDrive 图标。
+    QPixmap iconPixmap(64, 64);
+    iconPixmap.fill(Qt::transparent);
+    QPainter iconPainter(&iconPixmap);
+    iconPainter.setRenderHint(QPainter::Antialiasing);
+    iconPainter.setPen(Qt::NoPen);
+    iconPainter.setBrush(QColor("#0969da"));
+    iconPainter.drawRoundedRect(2, 2, 60, 60, 14, 14);
+    iconPainter.setBrush(Qt::white);
+    iconPainter.drawEllipse(16, 30, 22, 18);
+    iconPainter.drawEllipse(28, 22, 24, 26);
+    iconPainter.drawRoundedRect(14, 34, 38, 16, 8, 8);
+    app.setWindowIcon(QIcon(iconPixmap));
     app.setStyle(QStyleFactory::create("Fusion"));
     app.setStyleSheet(R"(
         QWidget { background: #f6f8fa; color: #1f2328; font-family: "Segoe UI"; font-size: 13px; }
@@ -341,6 +356,11 @@ int main(int argc, char **argv) {
         QLabel#brandSub { color: #8a95a3; font-size: 11px; }
         QLabel#navGroup { color: #98a2b3; font-size: 11px; font-weight: 700; padding: 11px 10px 5px 10px; }
         QLabel#breadcrumb { color: #64748b; font-size: 12px; }
+        QPushButton#breadcrumb {
+            background: transparent; color: #64748b; border: none;
+            padding: 2px 0; text-align: left; font-size: 12px;
+        }
+        QPushButton#breadcrumb:hover { color: #1664d9; }
         QPushButton#navButton { background: transparent; color: #475569; border: none; border-radius: 7px; padding: 9px 12px; text-align: left; font-weight: 500; }
         QPushButton#navButton:hover { background: #edf4ff; color: #1664d9; }
         QPushButton#navCurrent { background: #eaf2ff; color: #1769e0; border: none; border-radius: 7px; padding: 9px 12px; text-align: left; font-weight: 700; }
@@ -351,6 +371,7 @@ int main(int argc, char **argv) {
 
     QWidget window;
     window.setWindowTitle("LanCloudDrive");
+    window.setWindowIcon(app.windowIcon());
     window.setMinimumSize(1180, 720);
     window.resize(1480, 880);
     auto *windowLayout = new QVBoxLayout(&window);
@@ -533,7 +554,11 @@ int main(int argc, char **argv) {
     permissionAction->setEnabled(false);
     permissionAction->setToolTip(QStringLiteral("当前版本暂未实现权限管理"));
     fileHeading->addWidget(toolbar);
-    auto *breadcrumbLabel = makeLabel(QStringLiteral("回到上一层  |  文档库"), "breadcrumb");
+    // 面包屑同时作为可点击的“返回上一级”按钮，避免用户只能使用工具栏按钮。
+    auto *breadcrumbLabel = new QPushButton(QStringLiteral("回到上一层  |  文档库"));
+    breadcrumbLabel->setObjectName("breadcrumb");
+    breadcrumbLabel->setFlat(true);
+    breadcrumbLabel->setCursor(Qt::PointingHandCursor);
     auto *browser = new FileBrowser();
     auto *hoverPreview = new HoverPreviewCard(&window);
     fileLayout->addLayout(fileHeading);
@@ -745,6 +770,13 @@ int main(int argc, char **argv) {
     });
     QObject::connect(refreshAction, &QAction::triggered, [&]() { doList(currentParent); });
     QObject::connect(upAction, &QAction::triggered, [&]() {
+        if (parentStack.isEmpty()) return;
+        currentParent = parentStack.takeLast();
+        if (!pathNames.isEmpty()) pathNames.removeLast();
+        updateLocation();
+        doList(currentParent);
+    });
+    QObject::connect(breadcrumbLabel, &QPushButton::clicked, [&]() {
         if (parentStack.isEmpty()) return;
         currentParent = parentStack.takeLast();
         if (!pathNames.isEmpty()) pathNames.removeLast();

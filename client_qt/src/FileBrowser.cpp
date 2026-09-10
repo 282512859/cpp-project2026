@@ -66,6 +66,7 @@ FileBrowser::FileBrowser(QWidget *parent)
     connect(hoverTimer_, &QTimer::timeout, this, &FileBrowser::onHoverTimeout);
 
     connect(view_, &QTreeView::activated, this, &FileBrowser::onActivated);
+    connect(view_, &QTreeView::clicked, this, &FileBrowser::onClicked);
     connect(view_, &QWidget::customContextMenuRequested,
             this, &FileBrowser::onContextMenuRequested);
 }
@@ -146,6 +147,25 @@ bool FileBrowser::eventFilter(QObject *watched, QEvent *event) {
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void FileBrowser::onClicked(const QModelIndex &index) {
+    if (!index.isValid()) return;
+    const int row = index.row();
+    const bool directory = model_->data(model_->index(row, 6)).toString() == QStringLiteral("DIR");
+    if (directory) {
+        hoverTimer_->stop();
+        hoverIndex_ = QPersistentModelIndex();
+        emit previewHoverEnded();
+        return;
+    }
+    hoverTimer_->stop();
+    hoverIndex_ = QPersistentModelIndex(model_->index(row, 0));
+    hoverGlobalPos_ = view_->viewport()->mapToGlobal(view_->visualRect(index).center());
+    const qint64 id = model_->data(model_->index(row, 5)).toLongLong();
+    const QString name = model_->data(model_->index(row, 0)).toString();
+    const qint64 size = model_->data(model_->index(row, 0), Qt::UserRole + 1).toLongLong();
+    emit previewHovered(id, name, size, hoverGlobalPos_);
 }
 
 void FileBrowser::onActivated(const QModelIndex &index) {

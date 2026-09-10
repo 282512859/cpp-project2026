@@ -10,13 +10,7 @@ set(CMAKE_AUTOMOC ON)
 # WIN32 表示这是纯图形程序，不创建控制台窗口；关闭启动它的终端也不会结束客户端。
 add_executable(client_qt_example WIN32
   src/main.cpp
-  src/Theme.cpp
-  src/LoginPage.cpp
-  src/WorkspacePage.cpp
   src/FileBrowser.cpp
-  include/client_qt/Theme.h
-  include/client_qt/LoginPage.h
-  include/client_qt/WorkspacePage.h
   include/client_qt/FileBrowser.h
 )
 
