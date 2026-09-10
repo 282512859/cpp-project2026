@@ -13,6 +13,7 @@
 #include <cctype>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <thread>
 
@@ -26,20 +27,32 @@ namespace {
 using namespace cloud::common;
 
 std::uint64_t read64(const std::uint8_t* bytes) {
-    // UploadChunk 的 offset 按协议使用 8 字节大端序。
     std::uint64_t value=0;
     for(int i=0;i<8;++i) value=(value<<8U)|bytes[i];
     return value;
 }
 
-// JsonLite::object() 接收已经编码好的 JSON 值，布尔值不能再加引号。
 std::string boolean(bool value) { return value ? "true" : "false"; }
 
 std::filesystem::path converterHelperPath() {
     const auto executable=cloud::common::executableDirectory();
-    const auto besideExecutable=executable/"tools"/"document_converter.exe";
-    if(std::filesystem::is_regular_file(besideExecutable)) return besideExecutable;
-    return executable.parent_path()/"tools"/"document_converter.exe";
+    if(const auto configured=std::getenv("LANCLOUD_DOCUMENT_CONVERTER")) {
+        const std::filesystem::path path=configured;
+        if(std::filesystem::is_regular_file(path)) return path;
+    }
+    for(const auto& candidate : {executable/"tools"/"document_converter.exe",
+                                  executable.parent_path()/"tools"/"document_converter.exe"}) {
+        if(std::filesystem::is_regular_file(candidate)) return candidate;
+    }
+    auto cursor=executable;
+    for(int depth=0;depth<6;++depth) {
+        const auto candidate=cursor/"out"/"tools"/"document_converter.exe";
+        if(std::filesystem::is_regular_file(candidate)) return candidate;
+        const auto parent=cursor.parent_path();
+        if(parent==cursor) break;
+        cursor=parent;
+    }
+    return executable/"tools"/"document_converter.exe";
 }
 
 bool endsWithMarkdownExtension(const std::string& name) {
@@ -56,12 +69,7 @@ std::string defaultMarkdownName(const std::string& sourceName) {
 }
 
 std::string lowerExtension(const std::string& name) {
-    // name 是协议中的 UTF-8 文件名，不能交给 Windows 的 path(string) 做
-    // 本地代码页转换；扩展名只需按字节查找，不影响中文字符内容。
-    const auto slash=name.find_last_of("/\\");
-    const auto dot=name.find_last_of('.');
-    if(dot==std::string::npos || (slash!=std::string::npos && dot<=slash)) return {};
-    auto extension=name.substr(dot);
+    auto extension=std::filesystem::path(name).extension().string();
     std::transform(extension.begin(),extension.end(),extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return extension;
@@ -80,6 +88,13 @@ bool isImagePreviewable(const std::string& name) {
     const auto extension=lowerExtension(name);
     return extension==".png" || extension==".jpg" || extension==".jpeg" ||
            extension==".bmp" || extension==".gif" || extension==".svg";
+}
+
+bool isVideoPreviewable(const std::string& name) {
+    const auto extension=lowerExtension(name);
+    return extension==".mp4" || extension==".m4v" || extension==".mov" ||
+           extension==".mkv" || extension==".avi" || extension==".webm" ||
+           extension==".wmv" || extension==".mpeg" || extension==".mpg";
 }
 
 std::string readPreviewText(const std::filesystem::path& path,
@@ -123,29 +138,92 @@ void renderPdfFirstPage(const std::filesystem::path& source,
                         std::int64_t page) {
     const auto executable=cloud::common::executableDirectory();
     auto renderer=executable/"tools"/"pdftoppm.exe";
-    if(!std::filesystem::is_regular_file(renderer)) {
-        if(const auto configured=std::getenv("LANCLOUD_PDFTOPPM")) renderer=configured;
-        else renderer="pdftoppm.exe";
+    bool usePoppler=std::filesystem::is_regular_file(renderer);
+    if(!usePoppler) {
+        if(const auto configured=std::getenv("LANCLOUD_PDFTOPPM")) {
+            renderer=configured;
+            usePoppler=true;
+        }
     }
-    auto command=quotePreviewArgument(renderer.wstring())+
-        L" -f "+std::to_wstring(page)+L" -l "+std::to_wstring(page)+
-        L" -singlefile -png -scale-to-x 1400 -scale-to-y -1 "+
-        quotePreviewArgument(source.wstring())+L" "+quotePreviewArgument(outputBase.wstring());
+    if(usePoppler) {
+        auto command=quotePreviewArgument(renderer.wstring())+
+            L" -f "+std::to_wstring(page)+L" -l "+std::to_wstring(page)+
+            L" -singlefile -png -scale-to-x 1400 -scale-to-y -1 "+
+            quotePreviewArgument(source.wstring())+L" "+quotePreviewArgument(outputBase.wstring());
+        STARTUPINFOW startup{};
+        startup.cb=sizeof(startup);
+        PROCESS_INFORMATION process{};
+        if(CreateProcessW(renderer.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,
+                          nullptr,nullptr,&startup,&process)) {
+            CloseHandle(process.hThread);
+            const auto wait=WaitForSingleObject(process.hProcess,30000);
+            DWORD exitCode=1;
+            GetExitCodeProcess(process.hProcess,&exitCode);
+            if(wait==WAIT_TIMEOUT) TerminateProcess(process.hProcess,1);
+            CloseHandle(process.hProcess);
+            if(wait==WAIT_OBJECT_0 && exitCode==0) return;
+        }
+    }
+
+    const auto helper=converterHelperPath();
+    if(!std::filesystem::is_regular_file(helper))
+        throw ServiceError(ErrorCode::InternalError,
+            "document converter component is missing; PDF preview is unavailable");
+    auto output=outputBase;
+    output += ".png";
+    auto errorPath=outputBase;
+    errorPath += ".error.txt";
+    auto command=quotePreviewArgument(helper.wstring())+L" --render-pdf-page "+
+        quotePreviewArgument(source.wstring())+L" "+quotePreviewArgument(output.wstring())+
+        L" "+std::to_wstring(page)+L" "+quotePreviewArgument(errorPath.wstring());
     STARTUPINFOW startup{};
     startup.cb=sizeof(startup);
     PROCESS_INFORMATION process{};
-    if(!CreateProcessW(nullptr,command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,
-                       nullptr,nullptr,&startup,&process)) {
-        throw ServiceError(ErrorCode::InternalError,
-                           "PDF preview renderer is missing; install pdftoppm or set LANCLOUD_PDFTOPPM");
-    }
+    if(!CreateProcessW(helper.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,
+                       nullptr,nullptr,&startup,&process))
+        throw ServiceError(ErrorCode::InternalError,"cannot start bundled PDF preview renderer");
     CloseHandle(process.hThread);
     const auto wait=WaitForSingleObject(process.hProcess,30000);
     DWORD exitCode=1;
     GetExitCodeProcess(process.hProcess,&exitCode);
+    if(wait==WAIT_TIMEOUT) TerminateProcess(process.hProcess,1);
     CloseHandle(process.hProcess);
-    if(wait==WAIT_TIMEOUT || exitCode!=0)
-        throw ServiceError(ErrorCode::BadRequest,"PDF first-page rendering failed");
+    if(wait!=WAIT_OBJECT_0 || exitCode!=0) {
+        std::ifstream input(errorPath,std::ios::binary);
+        std::string message((std::istreambuf_iterator<char>(input)),std::istreambuf_iterator<char>());
+        if(message.empty()) message="PDF page rendering failed";
+        throw ServiceError(ErrorCode::BadRequest,message.substr(0,4096));
+    }
+}
+
+void renderVideoPreviewGif(const std::filesystem::path& source,
+                           const std::filesystem::path& output,
+                           const std::filesystem::path& errorPath) {
+    const auto helper=converterHelperPath();
+    if(!std::filesystem::is_regular_file(helper))
+        throw ServiceError(ErrorCode::InternalError,
+            "document converter component is missing; video preview is unavailable");
+    auto command=quotePreviewArgument(helper.wstring())+L" --render-video-preview "+
+        quotePreviewArgument(source.wstring())+L" "+quotePreviewArgument(output.wstring())+
+        L" "+quotePreviewArgument(errorPath.wstring());
+    STARTUPINFOW startup{};
+    startup.cb=sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if(!CreateProcessW(helper.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,
+                       nullptr,nullptr,&startup,&process))
+        throw ServiceError(ErrorCode::InternalError,"cannot start bundled video preview renderer");
+    CloseHandle(process.hThread);
+    const auto wait=WaitForSingleObject(process.hProcess,45000);
+    DWORD exitCode=1;
+    GetExitCodeProcess(process.hProcess,&exitCode);
+    if(wait==WAIT_TIMEOUT) TerminateProcess(process.hProcess,1);
+    CloseHandle(process.hProcess);
+    if(wait!=WAIT_OBJECT_0 || exitCode!=0) {
+        std::ifstream input(errorPath,std::ios::binary);
+        std::string message((std::istreambuf_iterator<char>(input)),std::istreambuf_iterator<char>());
+        if(message.empty()) message="video preview rendering failed";
+        throw ServiceError(ErrorCode::BadRequest,message.substr(0,4096));
+    }
 }
 #endif
 
@@ -172,17 +250,54 @@ std::vector<std::uint8_t> renderPdfPreview(const std::filesystem::path& source,
 #endif
 }
 
+
+std::vector<std::uint8_t> renderVideoPreview(const std::filesystem::path& source) {
+#ifdef _WIN32
+    const auto cacheRoot=std::filesystem::temp_directory_path()/"lancloud-video-preview-cache";
+    std::filesystem::create_directories(cacheRoot);
+    auto key=source.filename().string();
+    if(key.empty()) key=cloud::common::randomHex(16);
+    const auto cacheFile=cacheRoot/(key+".gif");
+    if(std::filesystem::is_regular_file(cacheFile)) {
+        try { return readPreviewAsset(cacheFile); }
+        catch(...) {
+            std::error_code ignored;
+            std::filesystem::remove(cacheFile,ignored);
+        }
+    }
+
+    const auto work=std::filesystem::temp_directory_path()/
+        ("lancloud-video-preview-"+cloud::common::randomHex(16));
+    std::filesystem::create_directories(work);
+    const auto output=work/"preview.gif";
+    const auto errorPath=work/"error.txt";
+    try {
+        renderVideoPreviewGif(source,output,errorPath);
+        auto bytes=readPreviewAsset(output);
+        std::error_code ignored;
+        std::filesystem::copy_file(output,cacheFile,
+            std::filesystem::copy_options::overwrite_existing,ignored);
+        std::filesystem::remove_all(work,ignored);
+        return bytes;
+    } catch(...) {
+        std::error_code ignored;
+        std::filesystem::remove_all(work,ignored);
+        throw;
+    }
+#else
+    throw ServiceError(ErrorCode::InternalError,"video preview is currently available on Windows only");
+#endif
+}
+
 } // namespace
 
 ServerApp::ServerApp(std::string address, std::uint16_t port,
                      const std::filesystem::path& runtimeRoot)
     : address_(std::move(address)), port_(port),
-      // cloud.db 保存元数据，storage 保存真实文件内容。
       repository_(runtimeRoot / "cloud.db", runtimeRoot / "storage"),
       markdownConverter_(converterHelperPath(),runtimeRoot/"conversion") {}
 
 void ServerApp::run() {
-    // listener 只负责接收新连接；具体报文交给客户端线程处理。
     auto listener = listenTcp(address_, port_);
     std::cout << "LanCloudDrive server listening on " << address_ << ':' << port_ << '\n';
     std::thread(&ServerApp::cleanupLoop, this).detach();
@@ -216,7 +331,6 @@ void ServerApp::cleanupLoop() {
 
 void ServerApp::serveClient(Socket client, std::string peer) {
     try {
-        // 一条 TCP 连接可以承载多个连续的请求，不是处理一次就关闭。
         for (;;) {
             const auto request = receivePacket(client);
             sendPacket(client, handle(request));
@@ -400,9 +514,13 @@ Packet ServerApp::handle(const Packet& request) {
             if(isImagePreviewable(source.name)) {
                 if(page!=1) throw ServiceError(ErrorCode::BadRequest,"image preview has only one page");
                 bytes=readPreviewAsset(source.blobPath);
-            } else if(extension==".pdf") bytes=renderPdfPreview(source.blobPath,page);
-            else throw ServiceError(ErrorCode::BadRequest,
-                "visual preview supports PNG, JPEG, BMP, GIF, SVG, and PDF files");
+            } else if(extension==".pdf") {
+                bytes=renderPdfPreview(source.blobPath,page);
+            } else if(isVideoPreviewable(source.name)) {
+                if(page!=1) throw ServiceError(ErrorCode::BadRequest,"video preview has only one clip");
+                bytes=renderVideoPreview(source.blobPath);
+            } else throw ServiceError(ErrorCode::BadRequest,
+                "visual preview supports images, PDF, and common video files");
             return makePacket(MessageType::PreviewAssetResp,request.header.requestId,
                               std::move(bytes),FlagResponse|FlagBinary);
         }

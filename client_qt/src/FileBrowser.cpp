@@ -1,10 +1,12 @@
 #include "client_qt/FileBrowser.h"
-#include <QHeaderView>
-#include <QStandardItem>
-#include <QContextMenuEvent>
+
+#include <QAbstractItemView>
 #include <QDateTime>
-#include <QFileInfo>
+#include <QHeaderView>
+#include <QEvent>
+#include <QMouseEvent>
 #include <QLocale>
+#include <QStandardItem>
 #include <QStyle>
 #include <QVBoxLayout>
 
@@ -22,113 +24,173 @@ QString friendlySize(qint64 bytes) {
     return QStringLiteral("%1 %2").arg(value, 0, 'f', value < 10.0 ? 1 : 0).arg(units.at(unit));
 }
 
-bool convertibleDocument(const QString &name) {
-    const auto extension=QFileInfo(name).suffix().toLower();
-    return extension=="docx" || extension=="pdf";
-}
-
 } // namespace
 
 FileBrowser::FileBrowser(QWidget *parent)
     : QWidget(parent), view_(new QTreeView(this)), model_(new QStandardItemModel(this)) {
-    auto layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0,0,0,0);
+    auto *layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(view_);
 
-    model_->setHorizontalHeaderLabels({"Name", "Size", "Modified", "ID", "Type"});
+    model_->setHorizontalHeaderLabels({
+        QStringLiteral("文档名称"), QStringLiteral("大小"), QStringLiteral("修改时间"),
+        QStringLiteral("创建者"), QStringLiteral("操作"), QStringLiteral("ID"), QStringLiteral("TYPE")
+    });
     view_->setModel(model_);
     view_->setRootIsDecorated(false);
-    view_->setAlternatingRowColors(true);
+    view_->setAlternatingRowColors(false);
+    view_->setSelectionBehavior(QAbstractItemView::SelectRows);
     view_->setSelectionMode(QAbstractItemView::SingleSelection);
     view_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     view_->setUniformRowHeights(true);
-    view_->setAnimated(true);
+    view_->setAnimated(false);
     view_->setContextMenuPolicy(Qt::CustomContextMenu);
-    view_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    view_->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    view_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    view_->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    view_->header()->setSectionResizeMode(4, QHeaderView::ResizeToContents);
-    view_->setColumnHidden(3, true);
-    view_->setColumnHidden(4, true);
+    view_->setMouseTracking(true);
+    view_->viewport()->setMouseTracking(true);
+    view_->viewport()->installEventFilter(this);
+    view_->setColumnHidden(5, true);
+    view_->setColumnHidden(6, true);
+
+    auto *header = view_->header();
+    header->setStretchLastSection(false);
+    header->setSectionResizeMode(0, QHeaderView::Stretch);
+    header->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+    view_->setMinimumHeight(360);
+
+    hoverTimer_ = new QTimer(this);
+    hoverTimer_->setSingleShot(true);
+    hoverTimer_->setInterval(650);
+    connect(hoverTimer_, &QTimer::timeout, this, &FileBrowser::onHoverTimeout);
 
     connect(view_, &QTreeView::activated, this, &FileBrowser::onActivated);
-    connect(view_, &QWidget::customContextMenuRequested, this, &FileBrowser::onContextMenuRequested);
-    connect(view_->selectionModel(), &QItemSelectionModel::currentChanged,
-            this, &FileBrowser::onCurrentChanged);
+    connect(view_, &QWidget::customContextMenuRequested,
+            this, &FileBrowser::onContextMenuRequested);
+}
+
+void FileBrowser::setCreatorName(const QString &name) {
+    creatorName_ = name;
 }
 
 void FileBrowser::setEntries(const QVariantList &entries) {
     model_->removeRows(0, model_->rowCount());
-    for (const auto &v : entries) {
-        auto m = v.toMap();
-        const bool directory = m.value("directory").toBool();
-        QList<QStandardItem*> row;
-        auto nameItem = new QStandardItem(m.value("name").toString());
-        nameItem->setData(m.value("size"), Qt::UserRole + 1);
+    for (const auto &value : entries) {
+        const auto map = value.toMap();
+        const bool directory = map.value("directory").toBool();
+        QList<QStandardItem *> row;
+
+        auto *nameItem = new QStandardItem(map.value("name").toString());
         nameItem->setIcon(view_->style()->standardIcon(
             directory ? QStyle::SP_DirIcon : QStyle::SP_FileIcon));
-        nameItem->setEditable(false);
+        nameItem->setData(map.value("size"), Qt::UserRole + 1);
         row.append(nameItem);
-        auto sizeItem = new QStandardItem(directory ? QStringLiteral("—")
-                                                    : friendlySize(m.value("size").toLongLong()));
-        sizeItem->setEditable(false);
+
+        auto *sizeItem = new QStandardItem(directory
+            ? QStringLiteral("—")
+            : friendlySize(map.value("size").toLongLong()));
         sizeItem->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         row.append(sizeItem);
-        const auto modified = QDateTime::fromMSecsSinceEpoch(m.value("modifiedAt").toLongLong());
-        auto modItem = new QStandardItem(QLocale().toString(modified, QLocale::ShortFormat));
-        modItem->setEditable(false);
-        row.append(modItem);
-        auto idItem = new QStandardItem(QString::number(m.value("id").toLongLong()));
-        idItem->setEditable(false);
-        row.append(idItem);
-        auto typeItem = new QStandardItem(directory ? "DIR" : "FILE");
-        typeItem->setEditable(false);
-        row.append(typeItem);
+
+        const auto modified = QDateTime::fromMSecsSinceEpoch(
+            map.value("modifiedAt").toLongLong());
+        row.append(new QStandardItem(
+            QLocale().toString(modified, QStringLiteral("yyyy-MM-dd HH:mm"))));
+
+        row.append(new QStandardItem(
+            creatorName_.isEmpty() ? QStringLiteral("—") : creatorName_));
+        row.append(new QStandardItem(directory
+            ? QStringLiteral("双击打开 · 右键更多")
+            : QStringLiteral("下载 · 右键更多")));
+        row.append(new QStandardItem(QString::number(map.value("id").toLongLong())));
+        row.append(new QStandardItem(directory ? QStringLiteral("DIR") : QStringLiteral("FILE")));
         model_->appendRow(row);
     }
 }
 
+bool FileBrowser::selectedNode(qint64 &nodeId, QString &name, bool &directory) const {
+    const QModelIndex index = view_->currentIndex();
+    if (!index.isValid()) return false;
+    const int row = index.row();
+    nodeId = model_->data(model_->index(row, 5)).toLongLong();
+    name = model_->data(model_->index(row, 0)).toString();
+    directory = model_->data(model_->index(row, 6)).toString() == QStringLiteral("DIR");
+    return true;
+}
+
+
+bool FileBrowser::eventFilter(QObject *watched, QEvent *event) {
+    if (watched == view_->viewport()) {
+        if (event->type() == QEvent::MouseMove) {
+            auto *mouse = static_cast<QMouseEvent *>(event);
+            QModelIndex index = view_->indexAt(mouse->position().toPoint());
+            if (index.isValid()) index = model_->index(index.row(), 0);
+            hoverGlobalPos_ = view_->viewport()->mapToGlobal(mouse->position().toPoint());
+            const bool changed = (!index.isValid() && hoverIndex_.isValid()) ||
+                (index.isValid() && (!hoverIndex_.isValid() || index.row() != hoverIndex_.row()));
+            if (changed) {
+                hoverTimer_->stop();
+                if (hoverIndex_.isValid()) emit previewHoverEnded();
+                hoverIndex_ = QPersistentModelIndex(index);
+                if (index.isValid()) {
+                    const bool directory = model_->data(model_->index(index.row(), 6)).toString() == QStringLiteral("DIR");
+                    if (!directory) hoverTimer_->start();
+                    else hoverIndex_ = QPersistentModelIndex();
+                }
+            }
+        } else if (event->type() == QEvent::Leave) {
+            hoverTimer_->stop();
+            hoverIndex_ = QPersistentModelIndex();
+            emit previewHoverEnded();
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void FileBrowser::onActivated(const QModelIndex &index) {
     if (!index.isValid()) return;
-    // column 3 stores ID
-    auto idIndex = model_->index(index.row(), 3);
-    bool ok=false;
-    qint64 id = model_->data(idIndex).toLongLong();
-    auto typeIndex = model_->index(index.row(), 4);
-    QString type = model_->data(typeIndex).toString();
-    if (type=="DIR") {
-        emit enterDirectory(id, model_->data(model_->index(index.row(), 0)).toString());
+    const int row = index.row();
+    const qint64 id = model_->data(model_->index(row, 5)).toLongLong();
+    const bool directory = model_->data(model_->index(row, 6)).toString() == QStringLiteral("DIR");
+    if (directory) {
+        emit enterDirectory(id, model_->data(model_->index(row, 0)).toString());
     }
+}
+
+
+void FileBrowser::onHoverTimeout() {
+    if (!hoverIndex_.isValid()) return;
+    const int row = hoverIndex_.row();
+    const bool directory = model_->data(model_->index(row, 6)).toString() == QStringLiteral("DIR");
+    if (directory) return;
+    const qint64 id = model_->data(model_->index(row, 5)).toLongLong();
+    const QString name = model_->data(model_->index(row, 0)).toString();
+    const qint64 size = model_->data(model_->index(row, 0), Qt::UserRole + 1).toLongLong();
+    emit previewHovered(id, name, size, hoverGlobalPos_);
 }
 
 void FileBrowser::onContextMenuRequested(const QPoint &pos) {
-    QModelIndex idx = view_->indexAt(pos);
-    if (!idx.isValid()) return;
-    auto id = model_->data(model_->index(idx.row(), 3)).toLongLong();
-    const auto name = model_->data(model_->index(idx.row(), 0)).toString();
-    const bool directory = model_->data(model_->index(idx.row(), 4)).toString() == "DIR";
-    QMenu menu(this);
-    menu.addAction(directory ? "Download folder" : "Download",
-                   [this, id, name, directory](){ emit downloadNode(id, name, directory); });
-    if (!directory) {
-        menu.addAction("Create extraction code", [this, id](){ emit createShareCode(id); });
-        if (convertibleDocument(name)) {
-            menu.addAction("Save as Markdown", [this, id](){ emit convertToMarkdown(id); });
-        }
-    }
-    menu.addAction("Rename", [this, id](){ emit renameNode(id); });
-    menu.addAction("Delete", [this, id](){ emit deleteNode(id); });
-    menu.addAction("Refresh", [this](){ emit refreshRequested(); });
-    menu.exec(view_->viewport()->mapToGlobal(pos));
-}
+    const QModelIndex index = view_->indexAt(pos);
+    if (!index.isValid()) return;
+    view_->setCurrentIndex(index);
 
-void FileBrowser::onCurrentChanged(const QModelIndex &current, const QModelIndex &) {
-    if (!current.isValid()) return;
-    const auto row = current.row();
-    const auto id = model_->data(model_->index(row, 3)).toLongLong();
-    const auto name = model_->data(model_->index(row, 0)).toString();
-    const bool directory = model_->data(model_->index(row, 4)).toString() == "DIR";
-    const auto size = model_->data(model_->index(row, 0), Qt::UserRole + 1).toLongLong();
-    emit nodeSelected(id, name, directory, size);
+    const int row = index.row();
+    const qint64 id = model_->data(model_->index(row, 5)).toLongLong();
+    const QString name = model_->data(model_->index(row, 0)).toString();
+    const bool directory = model_->data(model_->index(row, 6)).toString() == QStringLiteral("DIR");
+
+    QMenu menu(this);
+    menu.addAction(directory ? QStringLiteral("下载文件夹") : QStringLiteral("下载"),
+                   [this, id, name, directory]() { emit downloadNode(id, name, directory); });
+    if (!directory) {
+        menu.addAction(QStringLiteral("创建提取码"),
+                       [this, id]() { emit createShareCode(id); });
+    }
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("重命名"), [this, id]() { emit renameNode(id); });
+    menu.addAction(QStringLiteral("删除"), [this, id]() { emit deleteNode(id); });
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("刷新"), [this]() { emit refreshRequested(); });
+    menu.exec(view_->viewport()->mapToGlobal(pos));
 }

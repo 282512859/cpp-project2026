@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
 )
 
@@ -23,8 +23,23 @@ if ((Test-Path $converterExe -PathType Leaf) -and
 }
 
 if (-not (Test-Path $python -PathType Leaf)) {
-    & py -m venv $venv
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to create the converter Python environment.' }
+    $basePython = $null
+    $pathPython = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($pathPython) {
+        & $pathPython.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3,10) else 1)"
+        if ($LASTEXITCODE -eq 0) { $basePython = $pathPython.Source }
+    }
+    if ($basePython) {
+        & $basePython -m venv $venv
+    } else {
+        $created = $false
+        foreach ($tag in @('3.13','3.12','3.11','3.10')) {
+            & py -$tag -m venv $venv 2>$null
+            if ($LASTEXITCODE -eq 0) { $created = $true; break }
+        }
+        if (-not $created) { throw 'Python 3.10+ is required to build document_converter.exe.' }
+    }
+    if (-not (Test-Path $python -PathType Leaf)) { throw 'Unable to create the converter Python environment.' }
 }
 
 $installed = $false
@@ -47,6 +62,8 @@ New-Item -ItemType Directory -Force -Path $output | Out-Null
     --collect-all markitdown `
     --collect-all magika `
     --collect-all mammoth `
+    --collect-all pypdfium2 `
+    --collect-all imageio_ffmpeg `
     $entryPoint
 if ($LASTEXITCODE -ne 0) { throw 'Unable to package document_converter.exe.' }
 
