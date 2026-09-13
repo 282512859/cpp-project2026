@@ -524,15 +524,41 @@ UploadInitResult CloudRepository::beginUpload(std::int64_t userId, std::int64_t 
 std::int64_t CloudRepository::appendUpload(std::int64_t userId, const std::string& id,
                                            std::int64_t offset, const std::uint8_t* data,
                                            std::size_t size) {
-    std::lock_guard lock(mutex_);
-    const auto it=uploads_.find(id);
-    if(it==uploads_.end()||it->second.userId!=userId) throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
-    auto& state=it->second;
-    if(offset!=state.received) throw ServiceError(ErrorCode::BadRequest,"unexpected upload offset");
-    if(state.received+static_cast<std::int64_t>(size)>state.expectedSize) throw ServiceError(ErrorCode::BadRequest,"upload exceeds declared size");
-    std::ofstream out(state.tempPath,std::ios::binary|std::ios::app);
+    std::shared_ptr<std::mutex> transferMutex;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it=uploads_.find(id);
+        if(it==uploads_.end()||it->second.userId!=userId)
+            throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
+        transferMutex=it->second.ioMutex;
+    }
+    std::lock_guard transferLock(*transferMutex);
+
+    UploadState snapshot;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it=uploads_.find(id);
+        if(it==uploads_.end()||it->second.userId!=userId||it->second.ioMutex!=transferMutex)
+            throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
+        snapshot=it->second;
+        if(offset!=snapshot.received) throw ServiceError(ErrorCode::BadRequest,"unexpected upload offset");
+        if(snapshot.received+static_cast<std::int64_t>(size)>snapshot.expectedSize)
+            throw ServiceError(ErrorCode::BadRequest,"upload exceeds declared size");
+    }
+
+    // Disk I/O is intentionally outside the repository-wide SQLite/map lock.
+    std::ofstream out(snapshot.tempPath,std::ios::binary|std::ios::app);
     out.write(reinterpret_cast<const char*>(data),static_cast<std::streamsize>(size));
     if(!out) throw ServiceError(ErrorCode::IoError,"cannot write upload block");
+    out.close();
+
+    std::lock_guard lock(mutex_);
+    const auto it=uploads_.find(id);
+    if(it==uploads_.end()||it->second.userId!=userId||it->second.ioMutex!=transferMutex)
+        throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
+    auto& state=it->second;
+    if(state.received!=offset)
+        throw ServiceError(ErrorCode::BadRequest,"unexpected upload offset");
     state.received+=static_cast<std::int64_t>(size);
     Statement progress(db_,"UPDATE upload_session SET received=?, expires_at=? WHERE transfer_id=?");
     progress.integer(1,state.received); progress.integer(2,nowMillis()+kUploadSessionTtlMillis); progress.text(3,id); progress.step();
@@ -540,16 +566,42 @@ std::int64_t CloudRepository::appendUpload(std::int64_t userId, const std::strin
 }
 
 std::int64_t CloudRepository::finishUpload(std::int64_t userId, const std::string& id) {
-    std::lock_guard lock(mutex_);
-    const auto it=uploads_.find(id);
-    if(it==uploads_.end()||it->second.userId!=userId) throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
-    const auto state=it->second;
-    if(state.received!=state.expectedSize) throw ServiceError(ErrorCode::BadRequest,"upload is incomplete");
+    std::shared_ptr<std::mutex> transferMutex;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it=uploads_.find(id);
+        if(it==uploads_.end()||it->second.userId!=userId)
+            throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
+        transferMutex=it->second.ioMutex;
+    }
+    std::lock_guard transferLock(*transferMutex);
+    UploadState state;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it=uploads_.find(id);
+        if(it==uploads_.end()||it->second.userId!=userId||it->second.ioMutex!=transferMutex)
+            throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
+        state=it->second;
+        if(state.received!=state.expectedSize)
+            throw ServiceError(ErrorCode::BadRequest,"upload is incomplete");
+    }
+
+    // SHA-256 can be expensive for large files; other repository operations
+    // continue while this transfer is verified.
     if(cloud::common::sha256File(state.tempPath)!=state.sha256) {
-        std::filesystem::remove(state.tempPath); uploads_.erase(it);
+        std::filesystem::remove(state.tempPath);
+        std::lock_guard lock(mutex_);
+        const auto it=uploads_.find(id);
+        if(it==uploads_.end()||it->second.ioMutex!=transferMutex)
+            throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
+        uploads_.erase(it);
         Statement drop(db_,"DELETE FROM upload_session WHERE transfer_id=?"); drop.text(1,id); drop.step();
         throw ServiceError(ErrorCode::HashMismatch,"uploaded file hash does not match");
     }
+    std::lock_guard lock(mutex_);
+    const auto it=uploads_.find(id);
+    if(it==uploads_.end()||it->second.userId!=userId||it->second.ioMutex!=transferMutex)
+        throw ServiceError(ErrorCode::TransferExpired,"upload transfer not found");
     auto finalPath=blobPath(state.sha256);
     std::filesystem::create_directories(finalPath.parent_path());
     std::int64_t blobId=0;
@@ -593,17 +645,27 @@ std::vector<std::uint8_t> CloudRepository::readDownload(std::int64_t userId,
                                                         std::int64_t offset,
                                                         std::size_t maxBytes,
                                                         bool& final) {
-    std::lock_guard lock(mutex_);
-    const auto it=downloads_.find(id);
-    if(it==downloads_.end()||it->second.userId!=userId) throw ServiceError(ErrorCode::TransferExpired,"download transfer not found");
-    if(offset<0||offset>it->second.size) throw ServiceError(ErrorCode::BadRequest,"invalid download offset");
-    const auto count=static_cast<std::size_t>(std::min<std::int64_t>(static_cast<std::int64_t>(maxBytes),it->second.size-offset));
+    DownloadState state;
+    {
+        std::lock_guard lock(mutex_);
+        const auto it=downloads_.find(id);
+        if(it==downloads_.end()||it->second.userId!=userId)
+            throw ServiceError(ErrorCode::TransferExpired,"download transfer not found");
+        state=it->second;
+    }
+    if(offset<0||offset>state.size) throw ServiceError(ErrorCode::BadRequest,"invalid download offset");
+    const auto count=static_cast<std::size_t>(std::min<std::int64_t>(static_cast<std::int64_t>(maxBytes),state.size-offset));
     std::vector<std::uint8_t> bytes(count);
-    std::ifstream in(it->second.blobPath,std::ios::binary);
+    // Blob reads are independent and must not serialize metadata operations.
+    std::ifstream in(state.blobPath,std::ios::binary);
     in.seekg(offset); in.read(reinterpret_cast<char*>(bytes.data()),static_cast<std::streamsize>(bytes.size()));
     if(static_cast<std::size_t>(in.gcount())!=bytes.size()) throw ServiceError(ErrorCode::IoError,"cannot read stored blob");
-    final=offset+static_cast<std::int64_t>(bytes.size())==it->second.size;
-    if(final) downloads_.erase(it);
+    final=offset+static_cast<std::int64_t>(bytes.size())==state.size;
+    if(final) {
+        std::lock_guard lock(mutex_);
+        const auto it=downloads_.find(id);
+        if(it!=downloads_.end()&&it->second.userId==userId) downloads_.erase(it);
+    }
     return bytes;
 }
 

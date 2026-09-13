@@ -4,6 +4,7 @@ add_executable(cloud_server
     src/MarkdownConverter.cpp
     src/ServerApp.cpp
     src/SessionManager.cpp
+    src/TaskExecutor.cpp
     src/main.cpp
 )
 target_include_directories(cloud_server PRIVATE include)

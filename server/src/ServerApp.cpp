@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 
@@ -33,6 +34,11 @@ std::uint64_t read64(const std::uint8_t* bytes) {
 }
 
 std::string boolean(bool value) { return value ? "true" : "false"; }
+
+std::size_t connectionWorkerCount() {
+    const auto cores = std::thread::hardware_concurrency();
+    return std::clamp<std::size_t>(cores == 0 ? 4 : cores * 2, 2, 8);
+}
 
 std::filesystem::path converterHelperPath() {
     const auto executable=cloud::common::executableDirectory();
@@ -302,22 +308,29 @@ ServerApp::ServerApp(std::string address, std::uint16_t port,
                      const std::filesystem::path& runtimeRoot)
     : address_(std::move(address)), port_(port),
       repository_(runtimeRoot / "cloud.db", runtimeRoot / "storage"),
-      markdownConverter_(converterHelperPath(),runtimeRoot/"conversion") {}
+      markdownConverter_(converterHelperPath(),runtimeRoot/"conversion"),
+      connectionExecutor_(connectionWorkerCount(), 64),
+      previewExecutor_(2, 16) {}
 
 void ServerApp::run() {
     auto listener = listenTcp(address_, port_);
     std::cout << "LanCloudDrive server listening on " << address_ << ':' << port_ << '\n';
-    std::thread(&ServerApp::cleanupLoop, this).detach();
+    cleanupThread_ = std::jthread([this](std::stop_token stop) { cleanupLoop(stop); });
     for (;;) {
         std::string peer;
         auto client = acceptTcp(listener, &peer);
         std::cout << "client connected: " << peer << '\n';
-        std::thread(&ServerApp::serveClient, this, std::move(client), std::move(peer)).detach();
+        auto queuedClient = std::make_shared<Socket>(std::move(client));
+        if (!connectionExecutor_.tryPost([this, queuedClient, peer = std::move(peer)]() mutable {
+                serveClient(std::move(*queuedClient), std::move(peer));
+            })) {
+            std::cout << "client rejected: connection queue is full\n";
+        }
     }
 }
 
 // 成员2：服务端存储 - 上传会话过期清理的后台回收线程。
-void ServerApp::cleanupLoop() {
+void ServerApp::cleanupLoop(std::stop_token stop) {
     // 清理间隔（秒），可用 LANCLOUD_UPLOAD_CLEANUP_SECONDS 覆盖，默认 10 分钟。
     const auto interval = [] {
         if (const char* v = std::getenv("LANCLOUD_UPLOAD_CLEANUP_SECONDS")) {
@@ -326,7 +339,9 @@ void ServerApp::cleanupLoop() {
         return 600;
     }();
     for (;;) {
-        std::this_thread::sleep_for(std::chrono::seconds(interval));
+        for (int second = 0; second < interval && !stop.stop_requested(); ++second)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (stop.stop_requested()) return;
         try {
             repository_.cleanupExpiredUploads();
             std::cout << "cleaned up expired upload sessions\n";
@@ -478,7 +493,10 @@ Packet ServerApp::handle(const Packet& request) {
             if(outputName.empty()) outputName=defaultMarkdownName(source.name);
             if(!endsWithMarkdownExtension(outputName))
                 throw ServiceError(ErrorCode::BadRequest,"output name must end with .md");
-            const auto converted=markdownConverter_.convert(source.blobPath,source.name);
+            auto conversion=previewExecutor_.submit([this, source] {
+                return markdownConverter_.convert(source.blobPath,source.name);
+            });
+            const auto converted=conversion.get();
             const auto nodeId=repository_.importLocalFile(user,source.parentId,
                                                           outputName,converted.path());
             return makeJsonPacket(MessageType::ConvertResp,request.header.requestId,
@@ -498,7 +516,10 @@ Packet ServerApp::handle(const Packet& request) {
                 content=readPreviewText(source.blobPath,maxBytes,truncated);
                 markdown=extension==".md" || extension==".markdown";
             } else if(extension==".docx" || extension==".pdf") {
-                const auto converted=markdownConverter_.convert(source.blobPath,source.name);
+                auto conversion=previewExecutor_.submit([this, source] {
+                    return markdownConverter_.convert(source.blobPath,source.name);
+                });
+                const auto converted=conversion.get();
                 content=readPreviewText(converted.path(),maxBytes,truncated);
                 markdown=true;
             } else {
@@ -522,10 +543,16 @@ Packet ServerApp::handle(const Packet& request) {
                 if(page!=1) throw ServiceError(ErrorCode::BadRequest,"image preview has only one page");
                 bytes=readPreviewAsset(source.blobPath);
             } else if(extension==".pdf") {
-                bytes=renderPdfPreview(source.blobPath,page);
+                auto rendering=previewExecutor_.submit([source, page] {
+                    return renderPdfPreview(source.blobPath,page);
+                });
+                bytes=rendering.get();
             } else if(isVideoPreviewable(source.name)) {
                 if(page!=1) throw ServiceError(ErrorCode::BadRequest,"video preview has only one clip");
-                bytes=renderVideoPreview(source.blobPath);
+                auto rendering=previewExecutor_.submit([source] {
+                    return renderVideoPreview(source.blobPath);
+                });
+                bytes=rendering.get();
             } else throw ServiceError(ErrorCode::BadRequest,
                 "visual preview supports images, PDF, and common video files");
             return makePacket(MessageType::PreviewAssetResp,request.header.requestId,
@@ -533,7 +560,8 @@ Packet ServerApp::handle(const Packet& request) {
         }
         default: throw ServiceError(ErrorCode::BadRequest,"unsupported message type");
         }
-    } catch(const ServiceError& e) { return error(request,e.code(),e.what()); }
+    } catch(const TaskRejected& e) { return error(request,ErrorCode::ServerBusy,e.what()); }
+      catch(const ServiceError& e) { return error(request,e.code(),e.what()); }
       catch(const std::exception& e) { return error(request,ErrorCode::BadRequest,e.what()); }
 }
 

@@ -8,10 +8,12 @@
 #include "cloud/server/CloudRepository.h"
 #include "cloud/server/MarkdownConverter.h"
 #include "cloud/server/SessionManager.h"
+#include "cloud/server/TaskExecutor.h"
 
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <thread>
 
 namespace cloud::server {
 
@@ -24,10 +26,10 @@ public:
     void run();
 
 private:
-    // 每个客户端连接由一个独立线程执行“收请求 -> 处理 -> 发响应”。
+    // 连接由有界工作池执行；同一连接仍在一个任务内顺序收发请求和响应。
     void serveClient(cloud::common::Socket client, std::string peer);
     // 成员2：服务端存储 - 上传会话过期清理后台线程。
-    void cleanupLoop();
+    void cleanupLoop(std::stop_token stop);
     // 所有消息类型都从这里进入，再分发到会话、存储或文档转换功能。
     cloud::common::Packet handle(const cloud::common::Packet& request);
     // 从 JSON 中取出 token 并换成 userId；失败时抛出 Unauthorized。
@@ -44,6 +46,9 @@ private:
     CloudRepository repository_;       // SQLite 元数据、目录树和文件块。
     MarkdownConverter markdownConverter_; // 文档转换和预览辅助工具。
     SessionManager sessions_;          // 当前服务端进程内的登录 token。
+    TaskExecutor connectionExecutor_;  // 有界连接工作池，避免每个连接 detach 一个线程。
+    TaskExecutor previewExecutor_;     // 限制外部预览/转换进程并发数。
+    std::jthread cleanupThread_;
 };
 
 } // namespace cloud::server

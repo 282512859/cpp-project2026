@@ -19,6 +19,7 @@ enum class ErrorCode {
     IoError,
     DbError,
     TransferExpired,
+    ServerBusy,
     InternalError,
 };
 
@@ -36,6 +37,7 @@ inline constexpr std::string_view toString(ErrorCode code) {
     case ErrorCode::IoError: return "IO_ERROR";
     case ErrorCode::DbError: return "DB_ERROR";
     case ErrorCode::TransferExpired: return "TRANSFER_EXPIRED";
+    case ErrorCode::ServerBusy: return "SERVER_BUSY";
     case ErrorCode::InternalError: return "INTERNAL_ERROR";
     }
     return "INTERNAL_ERROR";

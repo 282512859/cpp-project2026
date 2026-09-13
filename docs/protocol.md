@@ -36,6 +36,9 @@
 {"originalType":102,"errorCode":"UNAUTHORIZED","message":"invalid username or password"}
 ```
 
+当服务端的连接或预览任务队列达到上限时，返回 `SERVER_BUSY`；客户端应稍后重试，
+不应在同一时间无限重发请求。
+
 ## 上传
 
 1. `UPLOAD_INIT_REQ`：`token,parentId,name,size,sha256`；

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -93,6 +94,9 @@ private:
         std::int64_t expectedSize{};
         std::int64_t received{};
         std::filesystem::path tempPath;
+        // One transfer is sequential even when a token is reused from another
+        // connection; unrelated transfers must not block on file I/O.
+        std::shared_ptr<std::mutex> ioMutex{std::make_shared<std::mutex>()};
     };
     struct DownloadState {
         std::int64_t userId{};
