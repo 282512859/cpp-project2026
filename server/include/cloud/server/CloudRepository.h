@@ -85,6 +85,15 @@ public:
                                            bool& final);
     void cleanupExpiredUploads();
 
+    /**
+     * 暴露底层 SQLite 连接。
+     *
+     * 扩展功能模块（ExtendedFeatureService）与仓库位于同一个数据库文件，
+     * 因此需要用它设置统一的 busy timeout，避免两条连接同时写入时直接报
+     * SQLITE_BUSY。语句串行执行仍分别由各自的互斥量保证。
+     */
+    [[nodiscard]] sqlite3* handle() const noexcept { return db_; }
+
 private:
     struct UploadState {
         std::int64_t userId{};

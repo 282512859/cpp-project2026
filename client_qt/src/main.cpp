@@ -33,6 +33,7 @@
 #include <cmath>
 
 #include "client_qt/FileBrowser.h"
+#include "client_qt/FeatureHub.h"
 #include "cloud/client/QtClient.h"
 
 using namespace cloud::client;
@@ -511,6 +512,18 @@ int main(int argc, char **argv) {
     auto *navLayout = new QVBoxLayout(sidebar);
     navLayout->setContentsMargins(14, 18, 14, 18);
     navLayout->setSpacing(3);
+    // 侧栏视图标识：与上面每组的按钮顺序一一对应，交给 FeatureHub 绑定业务。
+    const QVector<QStringList> navViewIdGroups = {
+        {QStringLiteral("personal"), QStringLiteral("shared"), QStringLiteral("group"),
+         QStringLiteral("files"), QStringLiteral("archive"), QStringLiteral("transfers"),
+         QStringLiteral("trash"), QStringLiteral("quarantine")},
+        {QStringLiteral("permission"), QStringLiteral("link"), QStringLiteral("discover"),
+         QStringLiteral("blocked")},
+        {QStringLiteral("request"), QStringLiteral("review"), QStringLiteral("workflow")},
+    };
+    QVector<QPushButton *> navButtons;
+    QStringList navViewIds;
+    int navGroupIndex = 0;
     const auto addNavGroup = [&](const QString &title, const QStringList &items, int current = -1) {
         navLayout->addWidget(makeLabel(title, "navGroup"));
         for (int i = 0; i < items.size(); ++i) {
@@ -518,7 +531,11 @@ int main(int argc, char **argv) {
             button->setObjectName(i == current ? "navCurrent" : "navButton");
             button->setCursor(Qt::PointingHandCursor);
             navLayout->addWidget(button);
+            // 收集侧栏按钮，稍后交给 FeatureHub 绑定视图（按钮外观保持不变）。
+            navButtons.append(button);
+            navViewIds.append(navViewIdGroups.value(navGroupIndex).value(i));
         }
+        ++navGroupIndex;
     };
     addNavGroup(QStringLiteral("文档访问"), {QStringLiteral("⌂  个人文档"), QStringLiteral("☁  共享文档"), QStringLiteral("◎  群组文档"), QStringLiteral("▣  文档库"), QStringLiteral("▤  归档库"), QStringLiteral("⇄  收发任务"), QStringLiteral("♲  回收站"), QStringLiteral("◇  隔离区")}, 3);
     addNavGroup(QStringLiteral("共享管理"), {QStringLiteral("⌘  权限共享"), QStringLiteral("↗  外链共享"), QStringLiteral("◉  发现共享"), QStringLiteral("⊘  已屏蔽共享")});
@@ -551,9 +568,13 @@ int main(int argc, char **argv) {
     auto *refreshAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_BrowserReload), QStringLiteral("刷新"));
     auto *upAction = toolbar->addAction(window.style()->standardIcon(QStyle::SP_ArrowBack), QStringLiteral("上一层"));
     auto *permissionAction = toolbar->addAction(QStringLiteral("权限配置"));
-    permissionAction->setEnabled(false);
-    permissionAction->setToolTip(QStringLiteral("当前版本暂未实现权限管理"));
+    permissionAction->setToolTip(QStringLiteral("对选中的文件配置共享权限"));
     fileHeading->addWidget(toolbar);
+    // 扩展视图专用工具栏：进入回收站、共享、权限等入口时显示对应动作。
+    auto *viewToolbar = new QToolBar();
+    viewToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    viewToolbar->setVisible(false);
+    fileHeading->addWidget(viewToolbar);
     // 面包屑同时作为可点击的“返回上一级”按钮，避免用户只能使用工具栏按钮。
     auto *breadcrumbLabel = new QPushButton(QStringLiteral("回到上一层  |  文档库"));
     breadcrumbLabel->setObjectName("breadcrumb");
@@ -596,10 +617,17 @@ int main(int argc, char **argv) {
     pages->setCurrentWidget(loginPage);
 
     QtClient *client = nullptr;
+    bool previewRequestPending = false;
     QVariantList currentEntries;
     qint64 currentParent = 0;
     QVector<qint64> parentStack;
     QStringList pathNames;
+
+    // 扩展功能中枢：侧栏入口、扩展工具栏动作和各类对话框统一由它管理。
+    auto *featureHub = new FeatureHub(&window, browser, viewToolbar, locationLabel, itemCount,
+                                      quota, &window);
+    featureHub->attachSidebar(navButtons, navViewIds);
+    featureHub->attachStandardToolbar(toolbar);
 
     const auto updateLocation = [&]() {
         const QString pathText = pathNames.isEmpty()
@@ -643,9 +671,14 @@ int main(int argc, char **argv) {
             browser->setCreatorName(userEdit->text().trimmed());
             serverBadge->setText(QStringLiteral("%1:%2").arg(hostEdit->text().trimmed(), portEdit->text()));
             pages->setCurrentWidget(workspacePage);
+            // 扩展功能使用独立连接登录同一账号，失败也不会影响主客户端。
+            featureHub->setSession(hostEdit->text().trimmed(),
+                                   static_cast<quint16>(portEdit->text().toUShort()),
+                                   userEdit->text().trimmed(), passEdit->text());
             doList(0);
         });
         QObject::connect(boundClient, &QtClient::logoutFinished, [&]() {
+            featureHub->clearSession();
             currentEntries.clear();
             hoverPreview->hidePreview();
             browser->setEntries({});
@@ -656,6 +689,7 @@ int main(int argc, char **argv) {
         });
         QObject::connect(boundClient, &QtClient::errorOccurred,
                          [&](const QString &code, const QString &message) {
+            previewRequestPending = false;
             log->append(QStringLiteral("ERROR [%1] %2").arg(code, message));
             if (hoverPreview->isVisible()) hoverPreview->showError(message);
             if (pages->currentWidget() == loginPage) {
@@ -700,10 +734,12 @@ int main(int argc, char **argv) {
         });
         QObject::connect(boundClient, &QtClient::previewReady,
                          [&](const QString &title, const QString &content, bool markdown, bool truncated) {
+            previewRequestPending = false;
             hoverPreview->showText(title, content, markdown, truncated);
         });
         QObject::connect(boundClient, &QtClient::previewAssetReady,
                          [&](const QString &title, const QByteArray &bytes) {
+            previewRequestPending = false;
             hoverPreview->showAsset(title, bytes);
         });
         QObject::connect(boundClient, &QtClient::uploadProgress, [&](qint64 done, qint64 total) {
@@ -844,6 +880,7 @@ int main(int argc, char **argv) {
     });
     QObject::connect(browser, &FileBrowser::previewHovered,
                      [&](qint64 id, const QString &name, qint64 size, const QPoint &globalPos) {
+        if (!featureHub->usesStandardFileActions()) return;
         if (visualPreviewable(name) || textPreviewable(name)) {
             hoverPreview->showLoading(name, size, globalPos);
         } else {
@@ -854,6 +891,9 @@ int main(int argc, char **argv) {
             hoverPreview->showError(QStringLiteral("尚未连接服务端。"));
             return;
         }
+        // 预览与上传/下载共用顺序工作线程；快速掠过文件时只保留一个在途预览。
+        if (previewRequestPending) return;
+        previewRequestPending = true;
         if (visualPreviewable(name)) client->previewAsset(id, name, 1);
         else client->preview(id);
     });
@@ -861,6 +901,8 @@ int main(int argc, char **argv) {
                      [&]() { hoverPreview->hidePreview(); });
     QObject::connect(browser, &FileBrowser::enterDirectory,
                      [&](qint64 id, const QString &name) {
+        // 扩展管理视图（回收站、共享、权限等）的双击由 FeatureHub 处理。
+        if (!featureHub->usesStandardFileActions()) return;
         parentStack.append(currentParent);
         pathNames.append(name);
         currentParent = id;
@@ -869,6 +911,7 @@ int main(int argc, char **argv) {
     });
     QObject::connect(browser, &FileBrowser::downloadNode,
                      [&](qint64 id, const QString &name, bool directory) {
+        if (!featureHub->usesStandardFileActions()) return;
         if (!client) return;
         downloadProgress->setValue(0);
         if (directory) {
@@ -887,12 +930,14 @@ int main(int argc, char **argv) {
         client->download(id, save);
     });
     QObject::connect(browser, &FileBrowser::renameNode, [&](qint64 id) {
+        if (!featureHub->usesStandardFileActions()) return;
         bool ok = false;
         const QString name = QInputDialog::getText(&window, "Rename", "New name:",
                                                     QLineEdit::Normal, {}, &ok).trimmed();
         if (ok && !name.isEmpty() && client) client->renameNode(id, name);
     });
     QObject::connect(browser, &FileBrowser::deleteNode, [&](qint64 id) {
+        if (!featureHub->usesStandardFileActions()) return;
         if (!client) return;
         if (QMessageBox::question(&window, "Delete item",
                                   "Delete this item from the server? This cannot be undone.")
@@ -901,9 +946,24 @@ int main(int argc, char **argv) {
         }
     });
     QObject::connect(browser, &FileBrowser::createShareCode, [&](qint64 id) {
+        if (!featureHub->usesStandardFileActions()) return;
         if (client) client->createShareCode(id);
     });
     QObject::connect(browser, &FileBrowser::refreshRequested, [&]() { doList(currentParent); });
+    QObject::connect(permissionAction, &QAction::triggered,
+                     [&]() { featureHub->openPermissionDialog(); });
+    QObject::connect(featureHub, &FeatureHub::standardViewRequested, [&]() {
+        currentParent = 0;
+        parentStack.clear();
+        pathNames.clear();
+        updateLocation();
+        doList(0);
+    });
+    QObject::connect(featureHub, &FeatureHub::statusMessage,
+                     [&](const QString &text) { log->append(text); });
+    QObject::connect(featureHub, &FeatureHub::errorMessage, [&](const QString &text) {
+        log->append(QStringLiteral("ERROR %1").arg(text));
+    });
 
     updateLocation();
     window.show();

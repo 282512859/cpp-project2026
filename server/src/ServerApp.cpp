@@ -309,6 +309,7 @@ ServerApp::ServerApp(std::string address, std::uint16_t port,
     : address_(std::move(address)), port_(port),
       repository_(runtimeRoot / "cloud.db", runtimeRoot / "storage"),
       markdownConverter_(converterHelperPath(),runtimeRoot/"conversion"),
+      extendedFeatures_(runtimeRoot / "cloud.db", repository_, sessions_),
       connectionExecutor_(connectionWorkerCount(), 64),
       previewExecutor_(2, 16) {}
 
@@ -402,6 +403,10 @@ Packet ServerApp::handle(const Packet& request) {
 
         if(request.body.size()>kMaxJsonBodySize) throw ServiceError(ErrorCode::BadRequest,"JSON request too large");
         const auto body=json::parseObject(bodyAsString(request));
+        // 扩展功能占用 700～799 号消息：命中时由扩展服务处理，
+        // 返回空值表示这不是扩展请求，继续走下面的核心协议分支。
+        if (auto extended = extendedFeatures_.handle(request, body))
+            return *extended;
         switch(type) {
         case MessageType::RegisterReq: {
             repository_.registerUser(json::requireString(body,"username"),json::requireString(body,"password"));

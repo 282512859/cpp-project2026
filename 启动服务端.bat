@@ -4,7 +4,12 @@ setlocal
 rem ASCII-only batch file for reliable execution in cmd.exe.
 cd /d "%~dp0"
 
-set "SERVER_EXE=out\build\windows-debug-qt\server\Debug\cloud_server.exe"
+rem Prefer the Release build: it contains the extended document-management features
+rem and its PBKDF2 password hashing is fast enough for the client's 15s socket
+rem timeout (a Qt Debug build can take far longer than 15s and makes the client
+rem look like it cannot connect). The Debug build stays as a fallback.
+set "SERVER_EXE=out\build\windows-release-qt\server\Release\cloud_server.exe"
+if not exist "%SERVER_EXE%" set "SERVER_EXE=out\build\windows-debug-qt\server\Debug\cloud_server.exe"
 
 if not exist "%SERVER_EXE%" (
     echo [ERROR] Server executable not found: %SERVER_EXE%
@@ -22,6 +27,7 @@ if not errorlevel 1 (
 )
 
 echo Starting LanCloudDrive server...
+echo Executable: %SERVER_EXE%
 echo Listening on: 0.0.0.0:9000
 echo Runtime data: %CD%\runtime
 echo.

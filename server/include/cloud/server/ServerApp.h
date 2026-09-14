@@ -6,6 +6,7 @@
 #include "cloud/common/Packet.h"
 #include "cloud/common/Socket.h"
 #include "cloud/server/CloudRepository.h"
+#include "cloud/server/ExtendedFeatureService.h"
 #include "cloud/server/MarkdownConverter.h"
 #include "cloud/server/SessionManager.h"
 #include "cloud/server/TaskExecutor.h"
@@ -46,6 +47,8 @@ private:
     CloudRepository repository_;       // SQLite 元数据、目录树和文件块。
     MarkdownConverter markdownConverter_; // 文档转换和预览辅助工具。
     SessionManager sessions_;          // 当前服务端进程内的登录 token。
+    // 界面扩展功能（回收站、归档、隔离区、共享、权限、审核、群组）统一入口。
+    ExtendedFeatureService extendedFeatures_;
     TaskExecutor connectionExecutor_;  // 有界连接工作池，避免每个连接 detach 一个线程。
     TaskExecutor previewExecutor_;     // 限制外部预览/转换进程并发数。
     std::jthread cleanupThread_;

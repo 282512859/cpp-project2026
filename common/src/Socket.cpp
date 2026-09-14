@@ -11,8 +11,10 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 #endif
 
@@ -34,6 +36,71 @@ void closeNative(CloudNativeSocket s) {
 #else
     ::close(s);
 #endif
+}
+
+// 避免断网时操作系统无限等待，使工作线程可以尽快向 UI 报错。
+constexpr long kConnectTimeoutMs = 8000;
+constexpr long kIoTimeoutMs = 15000;
+
+void setBlocking(CloudNativeSocket s, bool blocking) {
+#ifdef _WIN32
+    u_long mode = blocking ? 0UL : 1UL;
+    if (ioctlsocket(s, FIONBIO, &mode) != 0) throw std::runtime_error("cannot configure socket mode");
+#else
+    const int flags = fcntl(s, F_GETFL, 0);
+    if (flags < 0 || fcntl(s, F_SETFL, blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK)) < 0)
+        throw std::runtime_error("cannot configure socket mode");
+#endif
+}
+
+void setIoTimeouts(CloudNativeSocket s) {
+#ifdef _WIN32
+    const DWORD timeout = static_cast<DWORD>(kIoTimeoutMs);
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+#else
+    const timeval timeout{ kIoTimeoutMs / 1000, (kIoTimeoutMs % 1000) * 1000 };
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#endif
+}
+
+bool connectWithTimeout(CloudNativeSocket s, const sockaddr* address, int length) {
+    setBlocking(s, false);
+    const int result = ::connect(s, address, length);
+    if (result == 0) {
+        setBlocking(s, true);
+        return true;
+    }
+    const int error = lastSocketError();
+#ifdef _WIN32
+    if (error != WSAEWOULDBLOCK && error != WSAEINPROGRESS) {
+#else
+    if (error != EINPROGRESS && error != EWOULDBLOCK) {
+#endif
+        setBlocking(s, true);
+        return false;
+    }
+    fd_set writable;
+    FD_ZERO(&writable);
+    FD_SET(s, &writable);
+    timeval timeout{ kConnectTimeoutMs / 1000, (kConnectTimeoutMs % 1000) * 1000 };
+#ifdef _WIN32
+    const int selected = select(0, nullptr, &writable, nullptr, &timeout);
+#else
+    const int selected = select(s + 1, nullptr, &writable, nullptr, &timeout);
+#endif
+    int socketError = 0;
+#ifdef _WIN32
+    int socketErrorLength = sizeof(socketError);
+#else
+    socklen_t socketErrorLength = sizeof(socketError);
+#endif
+    const bool connected = selected > 0 &&
+        getsockopt(s, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&socketError), &socketErrorLength) == 0 &&
+        socketError == 0;
+    setBlocking(s, true);
+    return connected;
 }
 
 void sendAll(CloudNativeSocket s, const std::uint8_t* data, std::size_t size) {
@@ -98,7 +165,9 @@ Socket connectTcp(const std::string& host, std::uint16_t port) {
     Socket connected;
     for (auto* p = results; p; p = p->ai_next) {
         Socket candidate(::socket(p->ai_family, p->ai_socktype, p->ai_protocol));
-        if (candidate.valid() && ::connect(candidate.native(), p->ai_addr, static_cast<int>(p->ai_addrlen)) == 0) {
+        if (candidate.valid() && connectWithTimeout(candidate.native(), p->ai_addr,
+                                                    static_cast<int>(p->ai_addrlen))) {
+            setIoTimeouts(candidate.native());
             connected = std::move(candidate); break;
         }
     }

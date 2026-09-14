@@ -72,6 +72,11 @@ signals:
     void downloadFinished();
 
 private:
+    // 对象在 UI 线程创建；网络连接要等到 queued slot 在 workerThread_ 执行时再建立。
+    bool ensureConnected();
+
+    std::string host_;
+    std::uint16_t port_{};
     std::unique_ptr<ClientCore> core_;
 };
 

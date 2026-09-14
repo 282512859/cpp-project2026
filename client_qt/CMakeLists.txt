@@ -12,6 +12,8 @@ add_executable(client_qt_example WIN32
   src/main.cpp
   src/FileBrowser.cpp
   include/client_qt/FileBrowser.h
+  src/FeatureHub.cpp
+  include/client_qt/FeatureHub.h
 )
 
 target_include_directories(client_qt_example PRIVATE

@@ -29,19 +29,25 @@ std::filesystem::path safeChildPath(const std::filesystem::path &parent,
 
 // ---------------------- ClientWorker ----------------------
 ClientWorker::ClientWorker(const std::string &host, std::uint16_t port, QObject *parent)
-    : QObject(parent) {
+    : QObject(parent), host_(host), port_(port) {
+    // 此构造函数由 UI 线程调用，不能在这里执行阻塞 TCP 连接。
+}
+
+bool ClientWorker::ensureConnected() {
+    if (core_) return true;
     try {
-        core_.reset(new ClientCore(host, port));
+        core_ = std::make_unique<ClientCore>(host_, port_);
+        return true;
     } catch (const std::exception &e) {
-        // Delay emitting error until a slot is called; store no core_ means all ops will report error
-        core_.reset();
+        emit error("NO_CONNECTION", QString::fromLocal8Bit(e.what()));
+        return false;
     }
 }
 
 ClientWorker::~ClientWorker() = default;
 
 void ClientWorker::doRegister(const QString &username, const QString &password) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         core_->registerUser(username.toStdString(), password.toStdString());
         emit registerFinished();
@@ -53,7 +59,7 @@ void ClientWorker::doRegister(const QString &username, const QString &password) 
 }
 
 void ClientWorker::doLogin(const QString &username, const QString &password) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         core_->login(username.toStdString(), password.toStdString());
         emit loginFinished();
@@ -65,7 +71,7 @@ void ClientWorker::doLogin(const QString &username, const QString &password) {
 }
 
 void ClientWorker::doLogout() {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         core_->logout();
         emit logoutFinished();
@@ -75,7 +81,7 @@ void ClientWorker::doLogout() {
 }
 
 void ClientWorker::doList(qint64 parentId) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto nodes = core_->list(static_cast<std::int64_t>(parentId));
         QVariantList out;
@@ -89,7 +95,7 @@ void ClientWorker::doList(qint64 parentId) {
 }
 
 void ClientWorker::doMkdir(qint64 parentId, const QString &name) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto id = core_->mkdir(static_cast<std::int64_t>(parentId), name.toStdString());
         emit mkdirFinished(static_cast<qint64>(id));
@@ -101,7 +107,7 @@ void ClientWorker::doMkdir(qint64 parentId, const QString &name) {
 }
 
 void ClientWorker::doRename(qint64 nodeId, const QString &name) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         core_->renameNode(static_cast<std::int64_t>(nodeId), name.toStdString());
         emit renameFinished();
@@ -113,7 +119,7 @@ void ClientWorker::doRename(qint64 nodeId, const QString &name) {
 }
 
 void ClientWorker::doDelete(qint64 nodeId) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         core_->deleteNode(static_cast<std::int64_t>(nodeId));
         emit deleteFinished();
@@ -125,7 +131,7 @@ void ClientWorker::doDelete(qint64 nodeId) {
 }
 
 void ClientWorker::doUpload(const QString &localPath, qint64 parentId, const QString &remoteName) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto nativePath = std::filesystem::path(localPath.toStdWString());
         const auto utf8RemoteName = remoteName.isEmpty()
@@ -147,7 +153,7 @@ void ClientWorker::doUpload(const QString &localPath, qint64 parentId, const QSt
 }
 
 void ClientWorker::doCreateShareCode(qint64 nodeId) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         emit shareCodeCreated(QString::fromStdString(core_->createShareCode(nodeId)));
     } catch (const ClientError &e) {
@@ -158,7 +164,7 @@ void ClientWorker::doCreateShareCode(qint64 nodeId) {
 }
 
 void ClientWorker::doClaimShareCode(const QString &code) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         emit shareCodeClaimed(static_cast<qint64>(core_->claimShareCode(
             code.trimmed().toLower().toStdString())));
@@ -170,7 +176,7 @@ void ClientWorker::doClaimShareCode(const QString &code) {
 }
 
 void ClientWorker::doPreview(qint64 nodeId) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto result=core_->preview(static_cast<std::int64_t>(nodeId));
         emit previewReady(QString::fromStdString(result.name),
@@ -183,7 +189,7 @@ void ClientWorker::doPreview(qint64 nodeId) {
 }
 
 void ClientWorker::doPreviewAsset(qint64 nodeId, const QString &title, qint64 page) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto result=core_->previewAsset(static_cast<std::int64_t>(nodeId),
                                               static_cast<std::int64_t>(page));
@@ -197,7 +203,7 @@ void ClientWorker::doPreviewAsset(qint64 nodeId, const QString &title, qint64 pa
 }
 
 void ClientWorker::doConvertToMarkdown(qint64 nodeId) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         emit markdownSaved(static_cast<qint64>(core_->convertToMarkdown(nodeId)));
     } catch (const ClientError &e) {
@@ -208,7 +214,7 @@ void ClientWorker::doConvertToMarkdown(qint64 nodeId) {
 }
 
 void ClientWorker::doUploadDirectory(const QString &localPath, qint64 parentId) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto root = std::filesystem::path(localPath.toStdWString());
         if (!std::filesystem::is_directory(root)) {
@@ -259,7 +265,7 @@ void ClientWorker::doUploadDirectory(const QString &localPath, qint64 parentId) 
 }
 
 void ClientWorker::doDownload(qint64 nodeId, const QString &localPath) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto progressCb = [this](std::int64_t done, std::int64_t total) {
             emit downloadProgress(static_cast<qint64>(done), static_cast<qint64>(total));
@@ -277,7 +283,7 @@ void ClientWorker::doDownload(qint64 nodeId, const QString &localPath) {
 
 void ClientWorker::doDownloadDirectory(qint64 nodeId, const QString &remoteName,
                                        const QString &localParentPath) {
-    if (!core_) { emit error("NO_CONNECTION", "ClientCore not initialized"); return; }
+    if (!ensureConnected()) return;
     try {
         const auto parent = std::filesystem::path(localParentPath.toStdWString());
         const auto root = safeChildPath(parent, remoteName.toUtf8().toStdString());
