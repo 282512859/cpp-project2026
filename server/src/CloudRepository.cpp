@@ -239,7 +239,7 @@ void ensureSha(const std::string& sha) {
 
 // PBKDF2-HMAC-SHA-256 的迭代次数。
 // 迭代次数越高，密码验证越慢，离线暴力破解的成本也越高。
-constexpr std::uint32_t kPbkdf2Iterations = 600000;
+constexpr std::uint32_t kPbkdf2Iterations = 10000;
 
 // 把二进制字节转换为小写十六进制字符串。
 std::string bytesToHex(const std::string& bytes)

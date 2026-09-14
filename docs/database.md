@@ -19,11 +19,11 @@
 
 ### 密码存储格式
 
-加固副本使用随机盐和 600000 次 PBKDF2-HMAC-SHA-256 派生，
+加固副本使用随机盐和 10000 次 PBKDF2-HMAC-SHA-256 派生，
 `password_hash` 的格式为：
 
 ```text
-pbkdf2_sha256$600000$<derived-key-hex>
+pbkdf2_sha256$10000$<derived-key-hex>
 ```
 
 `salt` 仍单独保存在 `users.salt` 中。登录时根据格式重新派生密码，
