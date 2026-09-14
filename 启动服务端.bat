@@ -1,26 +1,34 @@
 @echo off
 setlocal
 
-rem 始终从本脚本所在的项目根目录启动，避免 CMD 当前目录影响路径。
+rem ASCII-only batch file for reliable execution in cmd.exe.
 cd /d "%~dp0"
 
 set "SERVER_EXE=out\build\windows-debug-qt\server\Debug\cloud_server.exe"
 
 if not exist "%SERVER_EXE%" (
-    echo [错误] 未找到服务端程序：%SERVER_EXE%
-    echo 请先在 VS Code 或 CMake 中编译 cloud_server 目标。
+    echo [ERROR] Server executable not found: %SERVER_EXE%
+    echo Build the cloud_server target first.
     pause
     exit /b 1
 )
 
-echo 正在启动 LanCloudDrive 服务端...
-echo 监听地址：0.0.0.0:9000
-echo 运行数据：%CD%\runtime
+netstat -ano -p tcp | findstr /r /c:":9000 .*LISTENING" >nul
+if not errorlevel 1 (
+    echo [INFO] TCP port 9000 is already in use.
+    echo Stop the existing server before starting another one.
+    pause
+    exit /b 1
+)
+
+echo Starting LanCloudDrive server...
+echo Listening on: 0.0.0.0:9000
+echo Runtime data: %CD%\runtime
 echo.
-echo 请保持此窗口打开。按 Ctrl+C 可停止服务端。
+echo Keep this window open. Press Ctrl+C to stop the server.
 echo.
 "%SERVER_EXE%" 9000 ".\runtime"
 
 echo.
-echo 服务端已停止，退出代码：%ERRORLEVEL%
+echo Server stopped. Exit code: %ERRORLEVEL%
 pause
