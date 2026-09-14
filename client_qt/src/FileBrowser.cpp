@@ -153,6 +153,10 @@ void FileBrowser::onClicked(const QModelIndex &index) {
     if (!index.isValid()) return;
     const int row = index.row();
     const bool directory = model_->data(model_->index(row, 6)).toString() == QStringLiteral("DIR");
+    const qint64 id = model_->data(model_->index(row, 5)).toLongLong();
+    const QString name = model_->data(model_->index(row, 0)).toString();
+    const qint64 size = model_->data(model_->index(row, 0), Qt::UserRole + 1).toLongLong();
+    emit nodeSelected(id, name, directory, size);
     if (directory) {
         hoverTimer_->stop();
         hoverIndex_ = QPersistentModelIndex();
@@ -162,9 +166,6 @@ void FileBrowser::onClicked(const QModelIndex &index) {
     hoverTimer_->stop();
     hoverIndex_ = QPersistentModelIndex(model_->index(row, 0));
     hoverGlobalPos_ = view_->viewport()->mapToGlobal(view_->visualRect(index).center());
-    const qint64 id = model_->data(model_->index(row, 5)).toLongLong();
-    const QString name = model_->data(model_->index(row, 0)).toString();
-    const qint64 size = model_->data(model_->index(row, 0), Qt::UserRole + 1).toLongLong();
     emit previewHovered(id, name, size, hoverGlobalPos_);
 }
 
@@ -206,6 +207,10 @@ void FileBrowser::onContextMenuRequested(const QPoint &pos) {
     if (!directory) {
         menu.addAction(QStringLiteral("创建提取码"),
                        [this, id]() { emit createShareCode(id); });
+        if (name.endsWith(QStringLiteral(".docx"), Qt::CaseInsensitive)) {
+            menu.addAction(QStringLiteral("转换为 Markdown"),
+                           [this, id]() { emit convertToMarkdown(id); });
+        }
     }
     menu.addSeparator();
     menu.addAction(QStringLiteral("重命名"), [this, id]() { emit renameNode(id); });

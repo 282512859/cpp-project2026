@@ -25,6 +25,8 @@ signals:
     void renameNode(qint64 nodeId);
     void deleteNode(qint64 nodeId);
     void createShareCode(qint64 nodeId);
+    void convertToMarkdown(qint64 nodeId);
+    void nodeSelected(qint64 nodeId, const QString &name, bool directory, qint64 size);
     void refreshRequested();
     void previewHovered(qint64 nodeId, const QString &name, qint64 size, const QPoint &globalPos);
     void previewHoverEnded();
